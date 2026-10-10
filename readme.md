@@ -1,4 +1,4 @@
-# RingyoZumenMaker-UAV
+# <img src="icon.png" width="32" height="32" alt=""> RingyoZumenMaker-UAV
 
 QGISのポリゴン・ライン・オルソ画像から、森林整備事業向けの申請区域図、付帯作工物図、位置図、シェープファイルを作成するプラグインです。
 
