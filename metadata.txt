@@ -1,6 +1,6 @@
 [general]
-name=Ringyo Zumen Maker
-description=Need to replace fox
+name=Ringyo Zumen Maker UAV
+description=森林整備事業向けの申請区域図・付帯作工物図・位置図を作成
 version=0.1
 author=Sonehara Takahiro
 email=m48c7e72a7vrb6w23yw@gmail.com

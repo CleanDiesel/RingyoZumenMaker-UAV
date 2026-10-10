@@ -20,13 +20,13 @@ Gitを使う場合は、プラグインフォルダへクローンします。�
 ```powershell
 # Windows
 cd $env:APPDATA\QGIS\QGIS4\profiles\default\python\plugins
-git clone https://github.com/CleanDiesel/RingyoZumenMaker.git
+git clone https://github.com/CleanDiesel/RingyoZumenMaker-UAV.git RingyoZumenMaker
 ```
 
 ```bash
 # Linux
 cd ~/.local/share/QGIS/QGIS4/profiles/default/python/plugins
-git clone https://github.com/CleanDiesel/RingyoZumenMaker.git
+git clone https://github.com/CleanDiesel/RingyoZumenMaker-UAV.git RingyoZumenMaker
 ```
 
 ## 図面を作る

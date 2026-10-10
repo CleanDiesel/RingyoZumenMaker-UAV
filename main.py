@@ -2,8 +2,6 @@
 """UAV application-area drawing dock."""
 import json
 import os
-import re
-import shutil
 import tempfile
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
