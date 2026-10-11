@@ -68,7 +68,7 @@ class ProjectSession:
         config = copy.deepcopy(info["config"])
         base = Path(project.fileName()).parent
         config["output"]["directory"] = str((base / config["output"]["directory"]).resolve())
-        for name in ("assignment_ortho", "config_file"):
+        for name in ("assignment_ortho",):
             value = config["output"].get(name)
             if value and not Path(value).is_absolute():
                 config["output"][name] = str((base / value).resolve())

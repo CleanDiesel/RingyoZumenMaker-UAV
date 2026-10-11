@@ -106,8 +106,46 @@ for field, combo_name in widget._override_bindings.items():
     assert button.isEnabled() == (field not in ("hukuin", "singleLineWidth", "minKijuntenkan")), field
     combo.setLayer(selected_layer)
     assert button.isEnabled(), field
+from RingyoZumenMaker.uav_inputs import NAME_INPUTS, OVERRIDE_FIELDS
+for name in widget._override_bindings:
+    menu = getattr(widget, name + "Override").menu()
+    menu.aboutToShow.emit()
+    assert any(action.text() == "式を入力・編集…" and action.isEnabled()
+               for action in menu.actions()), name
+for name, combo_name in NAME_INPUTS.items():
+    field = getattr(widget, name)
+    field.setText("排水1 '文字列' \"そのまま\"")
+    layer = getattr(widget, combo_name).currentLayer()
+    assert widget.evaluate_attribute(name, layer, next(layer.getFeatures())) == field.text()
+    assert field.isEnabled()
+name_config = widget.configuration_data()
+widget.polygonName.setText("変更")
+widget.apply_configuration(name_config)
+assert widget.polygonName.text() == name_config["names"]["polygonName"]
+widget.singleLineInheritAll.setChecked(True)
+assert widget.singleLineInheritAll.isChecked()
+for field in OVERRIDE_FIELDS:
+    name = prefixed("singleLine", field)
+    button = getattr(widget, name + "Override")
+    assert button.isActive()
+    assert button.toProperty().asExpression() == widget.inheritance_expression(field)
+assert not widget.singleLineNameOverride.isActive()
+assert not widget.hukuinOverride.isActive()
+widget.singleLineRinpanOverride.setToProperty(QgsProperty())
+widget.singleLineRinpanOverride.changed.emit()
+assert not widget.singleLineInheritAll.isChecked()
+assert widget.singleLineShohanOverride.isActive()
+widget.singleLineInheritAll.setChecked(True)
+inherit_config = widget.configuration_data()
+widget.singleLineInheritAll.setChecked(False)
+assert all(not getattr(widget, prefixed("singleLine", field) + "Override").isActive()
+           for field in OVERRIDE_FIELDS)
+widget.apply_configuration(inherit_config)
+assert widget.singleLineInheritAll.isChecked()
+widget.singleLineInheritAll.setChecked(False)
+print("literal names, expression overrides and group inheritance config: OK")
 for name in ("polygonName", "jochiName", "jochiNameSagyodo", "singleLineName"):
-    getattr(widget, name).setExpression('"name"')
+    getattr(widget, name + "Override").setToProperty(QgsProperty.fromField("name"))
 for name in ("hukuin", "singleLineWidth"):
     button = getattr(widget, name + "Override")
     button.setToProperty(QgsProperty.fromField("width"))
@@ -123,7 +161,6 @@ widget.isJochikeisan.setChecked(True)
 widget.isIchizu.setChecked(True)
 widget.locationPaper.setCurrentText("A3")
 widget.assignmentOlso.setFilePath(str(ortho_path))
-widget.isSaveConfig.setCurrentIndex(1)
 output = output_root / "mixed"
 output.mkdir()
 widget.fileName.setFilePath(str(output))
@@ -338,8 +375,29 @@ for drawing in widget.drawings:
     assert reference.providerType() == "ogr"
     assert len(project.layoutManager().layouts()) == 4
     assert len(project.mapThemeCollection().mapThemes()) == 4
+    from RingyoZumenMaker.unified_project import metadata, UID
+    info = metadata(project)
+    exclusions_output = project.mapLayer(info["datasets"]["output:aggregate:exclusions"])
+    assert exclusions_output.labelsEnabled()
+    exclusion_features = list(exclusions_output.getFeatures())
+    assert all(feature[UID] for feature in exclusion_features)
+    assert len({feature[UID] for feature in exclusion_features}) == len(exclusion_features)
     maps = [item for item in project.layoutManager().layoutByName(drawing['folder']).items()
             if isinstance(item, __import__('qgis.core', fromlist=['QgsLayoutItemMap']).QgsLayoutItemMap)]
+    if drawing["kind"] == "申請区域":
+        from qgis.core import QgsLayoutExporter
+        theme = project.mapThemeCollection()
+        assert exclusions_output in theme.mapThemeVisibleLayers(drawing["folder"])
+        layout = project.layoutManager().layoutByName(drawing["folder"])
+        exporter = QgsLayoutExporter(layout)
+        with widget.export_layer_context(layout):
+            result = exporter.exportToImage(str(output_root / "exclusion-labels.png"),
+                                            QgsLayoutExporter.ImageExportSettings())
+        assert result == QgsLayoutExporter.Success
+        placed = [label.labelText for labels in exporter.labelingResults().values()
+                  for label in labels.allLabels() if label.layerID == exclusions_output.id()]
+        assert placed, "Exclusion names must actually render, not just have labeling enabled"
+        print("rendered exclusion labels:", placed, flush=True)
     center = maps[0].extent().center()
     assert abs(center.x() - ortho.extent().center().x()) < 1e-6
     assert abs(center.y() - ortho.extent().center().y()) < 1e-6
@@ -378,7 +436,7 @@ previous = widget.output_target_paths(output)
 assert not (output / ".ringyo_zumen_outputs.json").exists()
 manual = output / widget.drawings[1]["folder"] / "user-note.txt"
 manual.write_text("手動追加", encoding="utf-8")
-widget.singleLineName.setExpression("'新名称' || \"name\"")
+widget.singleLineNameOverride.setToProperty(QgsProperty.fromExpression("'新名称' || \"name\""))
 widget.singleLineFilter.setExpression('"width" = 2')
 widget.backupQgz.setChecked(True)
 widget.on_submit(test=False)
@@ -470,7 +528,7 @@ print("horizontal line only, no orthophoto or reference points: exports OK", flu
 
 # Unsupported config versions fail before changing the current widget values.
 current_config = widget.configuration_data()
-for version in (None, 3, 4, 5, 7):
+for version in (None, 3, 4, 5, 6, 8):
     unsupported = json.loads(json.dumps(current_config))
     unsupported["version"] = version
     try:
@@ -578,6 +636,77 @@ for relative in ("asset/other.config", "custom.config", "input-copy.config", "ot
 assert not (named / ".ringyo_zumen_outputs.json").exists()
 assert not (named_batch / ".ringyo_zumen_outputs.json").exists()
 print("named backup: no history, arbitrary contents, root input.config only, outside folders ignored OK", flush=True)
+
+# Keep a temporary config on failure without replacing the last input.config.
+# Test the real transaction rollback and successful cleanup too.
+from unittest.mock import patch
+saved_configuration = widget.configuration_data()
+widget.outputMode.setCurrentIndex(1)
+for backup in (False, True):
+    widget.backupQgz.setChecked(backup)
+    for phase in ("validate_inputs", "calculate_uav", "export_uav", "commit"):
+        folder = output_root / f"config-error-{backup}-{phase}"
+        folder.mkdir()
+        widget.fileName.setFilePath(str(folder))
+        widget.polygonName.setText("エラー時も残す設定")
+        (folder / "input.config").write_text("old settings", encoding="utf-8")
+        (folder / "index.html").write_text("old drawing", encoding="utf-8")
+        expected = widget.configuration_data()
+        if phase != "commit":
+            with patch.object(widget, phase, side_effect=ValueError("injected failure")):
+                widget.on_submit(test=False)
+        else:
+            def fake_export():
+                (widget.output_dir() / "index.html").write_text("new drawing", encoding="utf-8")
+                widget._editable_projects = None
+            real_replace = os.replace
+            def fail_drawing_install(source, target):
+                source = Path(source)
+                if source.name == "index.html" and source.parent.name.startswith(".ringyo_zumen_tmp_"):
+                    raise OSError("injected commit failure")
+                return real_replace(source, target)
+            with patch.object(widget, "export_uav", side_effect=fake_export), \
+                    patch("RingyoZumenMaker.main.os.replace", side_effect=fail_drawing_install):
+                widget.on_submit(test=False)
+        assert json.loads((folder / "input.tmp.config").read_text(encoding="utf-8")) == expected
+        assert (folder / "input.config").read_text(encoding="utf-8") == "old settings"
+        assert (folder / "index.html").read_text(encoding="utf-8") == "old drawing"
+        assert widget.progressBar.value() != 100
+        assert not list(folder.glob(".ringyo_zumen_tmp_*"))
+        before = (folder / "input.config").read_bytes()
+        temporary_before = (folder / "input.tmp.config").read_bytes()
+        widget.polygonName.setText("試算では保存しない")
+        with patch.object(widget, "validate_inputs", side_effect=ValueError("trial failure")):
+            widget.on_submit(test=True)
+        assert (folder / "input.config").read_bytes() == before
+        assert (folder / "input.tmp.config").read_bytes() == temporary_before
+    expected = widget.configuration_data()
+    with patch.object(widget, "export_uav", side_effect=fake_export):
+        widget.on_submit(test=False)
+    assert widget.progressBar.value() == 100
+    assert not (folder / "input.tmp.config").exists()
+    assert json.loads((folder / "input.config").read_text(encoding="utf-8")) == expected
+    if backup:
+        archived = list((folder / "backup").glob("*/input.config"))
+        assert archived and all(path.read_text(encoding="utf-8") == "old settings" for path in archived)
+        assert not list((folder / "backup").rglob("input.tmp.config"))
+
+custom_folder = output_root / "custom-config-failure"
+custom_folder.mkdir()
+widget.fileName.setFilePath(str(custom_folder))
+custom_config = custom_folder / "custom.config"
+custom_config.write_text("old custom settings", encoding="utf-8")
+with patch.object(widget, "validate_inputs", side_effect=ValueError("custom failure")):
+    widget.on_submit(test=False)
+assert custom_config.read_text(encoding="utf-8") == "old custom settings"
+assert (custom_folder / "input.tmp.config").is_file()
+assert not hasattr(widget, "isSaveConfig")
+assert not hasattr(widget, "saveConfig")
+assert "config_save_mode" not in widget.configuration_data()["output"]
+assert "config_file" not in widget.configuration_data()["output"]
+assert not (custom_folder / "input.config").exists()
+widget.apply_configuration(saved_configuration)
+print("temporary config retained on error, removed on success; old config backed up; trial does not save; unrelated configs untouched; no save options: OK", flush=True)
 
 # UI preview is real Qt, with both duplicated attribute panels visible in turn.
 widget.resize(700, 930)

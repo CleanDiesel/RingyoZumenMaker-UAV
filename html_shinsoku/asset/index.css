@@ -14,11 +14,11 @@ h1 { text-align: center; font: 7mm 'Yu Mincho', serif; padding-top: calc(15mm * 
   grid-template-columns: 1fr 1.5fr 2fr 1.5fr;
   border: .7mm solid black; margin: 0 auto;
 }
-.info_container > div { border-right: .4mm solid black; display: flex; flex-direction: column; min-width: 0; }
+.info_container > div { position: relative; border-right: .4mm solid black; display: flex; flex-direction: column; min-width: 0; }
 .info_container > div:last-child { border-right: none; }
-.info_container .description { padding: .5mm; }
-.info_container .value { text-align: center; flex: 1; min-height: 0; min-width: 0; display: flex; justify-content: center; flex-direction: column; overflow: hidden; }
-.info_container .value1, .info_container .value2 { flex: 1; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.info_container .description { position: absolute; top: .6mm; left: .8mm; font-size: 3mm; line-height: 3mm; color: #444; }
+.info_container .value { text-align: center; flex: 1; min-height: 0; min-width: 0; display: flex; justify-content: center; flex-direction: column; gap: .5mm; overflow: hidden; }
+.info_container .value1, .info_container .value2 { flex: 0 1 auto; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .info_container .header-text {
   width: 100%; padding: 0 .6mm; line-height: 3.6mm;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;

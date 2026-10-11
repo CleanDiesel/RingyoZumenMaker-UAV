@@ -368,7 +368,10 @@
           </widget>
          </item>
          <item row="2" column="1">
-          <widget class="QgsFieldExpressionWidget" name="polygonName"/>
+          <layout class="QHBoxLayout" name="polygonNameInputLayout">
+           <item><widget class="QLineEdit" name="polygonName"/></item>
+           <item><widget class="QgsPropertyOverrideButton" name="polygonNameOverride"/></item>
+          </layout>
          </item>
          <item row="3" column="0" colspan="2">
           <widget class="Line" name="line_6">
@@ -756,7 +759,10 @@
           </widget>
          </item>
          <item row="4" column="1">
-          <widget class="QgsFieldExpressionWidget" name="jochiName"/>
+          <layout class="QHBoxLayout" name="jochiNameInputLayout">
+           <item><widget class="QLineEdit" name="jochiName"/></item>
+           <item><widget class="QgsPropertyOverrideButton" name="jochiNameOverride"/></item>
+          </layout>
          </item>
          <item row="5" column="0" colspan="2">
           <widget class="Line" name="line_2">
@@ -814,7 +820,10 @@
           </widget>
          </item>
          <item row="9" column="1">
-          <widget class="QgsFieldExpressionWidget" name="jochiNameSagyodo"/>
+          <layout class="QHBoxLayout" name="jochiNameSagyodoInputLayout">
+           <item><widget class="QLineEdit" name="jochiNameSagyodo"/></item>
+           <item><widget class="QgsPropertyOverrideButton" name="jochiNameSagyodoOverride"/></item>
+          </layout>
          </item>
         </layout>
        </item>
@@ -876,7 +885,10 @@
           </widget>
          </item>
          <item row="3" column="1">
-          <widget class="QgsFieldExpressionWidget" name="singleLineName"/>
+          <layout class="QHBoxLayout" name="singleLineNameInputLayout">
+           <item><widget class="QLineEdit" name="singleLineName"/></item>
+           <item><widget class="QgsPropertyOverrideButton" name="singleLineNameOverride"/></item>
+          </layout>
          </item>
          <item row="4" column="0" colspan="2">
           <widget class="Line" name="line">
@@ -891,6 +903,11 @@
             <string>属性</string>
            </property>
            <layout class="QFormLayout" name="singleLineFormLayout_7">
+            <item row="11" column="0" colspan="2">
+             <widget class="QCheckBox" name="singleLineInheritAll">
+              <property name="text"><string>すべて施行地から継承</string></property>
+             </widget>
+            </item>
             <item row="0" column="0">
              <widget class="QLabel" name="singleLineLabel_11">
               <property name="text">
@@ -1193,14 +1210,14 @@
       <layout class="QVBoxLayout" name="verticalLayout_7">
        <item>
         <layout class="QFormLayout" name="formLayout_3">
-         <item row="5" column="0">
+         <item row="3" column="0">
           <widget class="QLabel" name="outputModeLabel">
            <property name="text">
             <string>QGZの作成</string>
            </property>
           </widget>
          </item>
-         <item row="5" column="1">
+         <item row="3" column="1">
           <widget class="QComboBox" name="outputMode">
            <property name="toolTip">
             <string>どちらも入力から再計算します。「作成しない」ではQGZ・GPKGを出力・更新せず、既存ファイルも残します。</string>
@@ -1244,76 +1261,27 @@
           </widget>
          </item>
          <item row="1" column="0">
-          <widget class="QLabel" name="label_8">
-           <property name="text">
-            <string>設定を保存</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QComboBox" name="isSaveConfig">
-           <item>
-            <property name="text">
-             <string>しない</string>
-            </property>
-           </item>
-           <item>
-            <property name="text">
-             <string>出力フォルダに自動生成</string>
-            </property>
-           </item>
-           <item>
-            <property name="text">
-             <string>ファイルを指定して生成</string>
-            </property>
-           </item>
-          </widget>
-         </item>
-         <item row="2" column="0">
-          <widget class="QLabel" name="label_7">
-           <property name="text">
-            <string>設定保存ファイル</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="1">
-          <widget class="QgsFileWidget" name="saveConfig">
-           <property name="enabled">
-            <bool>false</bool>
-           </property>
-           <property name="dialogTitle">
-            <string/>
-           </property>
-           <property name="filter">
-            <string>設定ファイル (*.config)</string>
-           </property>
-           <property name="storageMode">
-            <enum>QgsFileWidget::StorageMode::SaveFile</enum>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="0">
           <widget class="QLabel" name="label_27">
            <property name="text">
             <string>生成ファイルのバックアップ</string>
            </property>
           </widget>
          </item>
-         <item row="3" column="1">
+         <item row="1" column="1">
           <widget class="QCheckBox" name="backupQgz">
            <property name="text">
             <string>する</string>
            </property>
           </widget>
          </item>
-         <item row="4" column="0">
+         <item row="2" column="0">
           <widget class="QLabel" name="label_39">
            <property name="text">
             <string>リネームしてコピーするオルソ画像（省略可）</string>
            </property>
           </widget>
          </item>
-         <item row="4" column="1">
+         <item row="2" column="1">
           <widget class="QgsFileWidget" name="assignmentOlso">
            <property name="enabled">
             <bool>true</bool>
@@ -1433,7 +1401,6 @@
  </customwidgets>
  <tabstops>
   <tabstop>tabWidget</tabstop>
-  <tabstop>saveConfig</tabstop>
   <tabstop>readConfig</tabstop>
   <tabstop>submit_bt</tabstop>
  </tabstops>

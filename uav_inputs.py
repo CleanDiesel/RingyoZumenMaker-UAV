@@ -3,7 +3,7 @@ import math
 from decimal import Decimal
 from pathlib import Path
 
-from qgis.PyQt.QtCore import QDate, QDateTime
+from qgis.PyQt.QtCore import QDate, QDateTime, QCoreApplication
 from qgis.PyQt.QtWidgets import QComboBox, QDateEdit, QLineEdit, QAbstractSpinBox
 from qgis.core import (
     Qgis, QgsCoordinateReferenceSystem, QgsExpression, QgsExpressionContext,
@@ -12,7 +12,10 @@ from qgis.core import (
 )
 
 
-CONFIG_VERSION = 6
+CONFIG_VERSION = 7
+
+NAME_INPUTS = {"polygonName": "polygon", "jochiName": "jochiPolygon",
+               "jochiNameSagyodo": "sagyodoLine", "singleLineName": "singleLine"}
 
 ATTRIBUTE_INPUTS = (
     ("shinkokyoku", "振興局"), ("shichoson", "市町村"), ("rinpan", "林班"),
@@ -22,11 +25,11 @@ ATTRIBUTE_INPUTS = (
 )
 OVERRIDE_FIELDS = tuple(field for field, _ in ATTRIBUTE_INPUTS)
 LAYER_INPUTS = {
-    "polygon": (QgsMapLayerProxyModel.PolygonLayer, ("polygonFilter", "polygonName", "edaban")),
-    "jochiPolygon": (QgsMapLayerProxyModel.PolygonLayer, ("jochiFilter", "jochiName")),
-    "sagyodoLine": (QgsMapLayerProxyModel.LineLayer, ("sagyodoFilter", "jochiNameSagyodo")),
+    "polygon": (QgsMapLayerProxyModel.PolygonLayer, ("polygonFilter", "edaban")),
+    "jochiPolygon": (QgsMapLayerProxyModel.PolygonLayer, ("jochiFilter",)),
+    "sagyodoLine": (QgsMapLayerProxyModel.LineLayer, ("sagyodoFilter",)),
     "singleLine": (QgsMapLayerProxyModel.LineLayer,
-                   ("singleLineFilter", "singleLineName", "singleLineEdaban")),
+                   ("singleLineFilter", "singleLineEdaban")),
     "kijunten": (QgsMapLayerProxyModel.PointLayer, ("kijuntenExp",)),
     "olso": (QgsMapLayerProxyModel.RasterLayer, ()),
 }
@@ -68,6 +71,9 @@ class UavInputs:
                 widget.setToolTip("空欄のフィルタは全地物。式は選択したレイヤの地物ごとに評価します。"
                                   if "Filter" in name or name == "kijuntenExp" else
                                   "選択したレイヤの地物ごとに評価します。空欄ならラベルなし。")
+        for name, combo_name in NAME_INPUTS.items():
+            self.setup_override(name, combo_name)
+            getattr(self, name).setToolTip("地物名を入力します。右のボタンでフィールド・式を指定できます。")
         for prefix, combo_name in (("", "polygon"),
                                    ("singleLine", "singleLine")):
             for field in OVERRIDE_FIELDS:
@@ -89,6 +95,8 @@ class UavInputs:
             combo = getattr(self, combo_name)
             combo.layerChanged.connect(lambda *_, n=field: self.update_override_enabled(n))
             self.update_override_enabled(field)
+        self.singleLineInheritAll.toggled.connect(self.set_all_attribute_inheritance)
+        self.update_inheritance_checkbox()
         self.minKijuntenkan.setMaximum(100000)
         self.minKijuntenkan.setDecimals(3)
         self.minKijuntenkan.setValue(20)
@@ -126,8 +134,9 @@ class UavInputs:
         self._expression_contexts.append(generator)
         button.registerExpressionContextGenerator(generator)
         button.setUsageInfo("左の入力値を、選択レイヤの地物ごとの属性または式で上書きします。")
+        button.menu().aboutToShow.connect(lambda n=field: self.label_expression_menu(n))
         self._override_bindings[field] = combo_name
-        if field.startswith("singleLine") and field != "singleLineWidth":
+        if field in {prefixed("singleLine", name) for name in OVERRIDE_FIELDS}:
             button.setUsageInfo("施行地の値を使う場合は「施行地の値を継承」を選びます。フィールド・式で個別に上書きすることもできます。")
             button.menu().aboutToShow.connect(lambda n=field: self.add_inheritance_action(n))
         combo.layerChanged.connect(button.setVectorLayer)
@@ -139,6 +148,12 @@ class UavInputs:
     @staticmethod
     def inheritance_expression(field):
         return "@ringyo_application_" + field
+
+    def label_expression_menu(self, name):
+        edit = QCoreApplication.translate("QgsPropertyOverrideButton", "Edit…")
+        for action in getattr(self, name + "Override").menu().actions():
+            if action.text() in (edit, "Edit…", "編集…"):
+                action.setText("式を入力・編集…")
 
     def add_inheritance_action(self, name):
         button = getattr(self, name + "Override")
@@ -155,6 +170,23 @@ class UavInputs:
         prop = QgsProperty.fromExpression(self.inheritance_expression(field), enabled)
         getattr(self, name + "Override").setToProperty(prop)
         self.update_override_enabled(name)
+
+    def set_all_attribute_inheritance(self, enabled):
+        for field in OVERRIDE_FIELDS:
+            name = prefixed("singleLine", field)
+            button = getattr(self, name + "Override")
+            if enabled or button.toProperty().asExpression() == self.inheritance_expression(field):
+                self.set_attribute_inheritance(name, field, enabled)
+        self.update_inheritance_checkbox()
+
+    def update_inheritance_checkbox(self):
+        checked = all(getattr(self, prefixed("singleLine", field) + "Override").isActive()
+                      and getattr(self, prefixed("singleLine", field) + "Override").toProperty().asExpression()
+                      == self.inheritance_expression(field) for field in OVERRIDE_FIELDS)
+        checkbox = self.singleLineInheritAll
+        previous = checkbox.blockSignals(True)
+        checkbox.setChecked(checked)
+        checkbox.blockSignals(previous)
 
     def application_attribute_value(self, field):
         layer = self.polygon.currentLayer()
@@ -174,12 +206,13 @@ class UavInputs:
         combo = getattr(self, self._override_bindings[field])
         button = getattr(self, field + "Override")
         available = combo.currentLayer() is not None
-        button.setEnabled(available or field in OVERRIDE_FIELDS or
+        button.setEnabled(available or field in NAME_INPUTS or field in OVERRIDE_FIELDS or
                           (field.startswith("singleLine") and field != "singleLineWidth"))
         if button.isActive() and button.toProperty().asExpression().startswith("@ringyo_application_"):
             button.setToolTip("施行地の値を継承しています。ボタンを開いて継承を解除すると、個別入力に戻ります。")
         getattr(self, field).setEnabled(not button.isActive() and
                                        (available or field not in ("hukuin", "singleLineWidth")))
+        self.update_inheritance_checkbox()
 
     @staticmethod
     def input_value(widget):
@@ -211,6 +244,9 @@ class UavInputs:
         return default if result is None or QgsVariantUtils.isNull(result) else result
 
     def evaluate_attribute(self, widget_name, layer, feature, default=""):
+        if widget_name in NAME_INPUTS:
+            value = self.override_value(widget_name, layer, feature)
+            return default if value is None or QgsVariantUtils.isNull(value) else value
         return self.evaluate_expression(getattr(self, widget_name).expression(), layer, feature, widget_name, default)
 
     def override_value(self, name, layer, feature):
@@ -303,8 +339,6 @@ class UavInputs:
                 raise ValueError("有効な縮尺を指定してください")
         if not self.fileName.filePath() or not Path(self.fileName.filePath()).is_dir():
             raise ValueError("出力先には存在するフォルダを指定してください")
-        if self.isSaveConfig.currentIndex() == 2 and not self.saveConfig.filePath().strip():
-            raise ValueError("設定保存ファイルを指定してください")
         image = self.assignmentOlso.filePath().strip()
         if image and (not Path(image).is_file() or Path(image).suffix.lower() not in
                       (".tif", ".tiff", ".jpg", ".jpeg", ".png", ".jp2", ".ecw", ".img")):
@@ -334,10 +368,10 @@ class UavInputs:
             "expressions": {name: getattr(self, name).expression()
                             for _, expressions in LAYER_INPUTS.values() for name in expressions},
             "attributes": literals,
+            "names": {name: getattr(self, name).text() for name in NAME_INPUTS},
             "overrides": {name: getattr(self, name + "Override").toProperty().toVariant() for name in self._override_bindings},
             "output": {"directory": self.fileName.filePath(), "backup_generated": self.backupQgz.isChecked(),
                        "create_qgz": self.outputMode.currentIndex() == 0,
-                       "config_save_mode": self.isSaveConfig.currentIndex(), "config_file": self.saveConfig.filePath(),
                        "assignment_ortho": self.assignmentOlso.filePath()},
         }
 
@@ -371,6 +405,8 @@ class UavInputs:
             for name in names:
                 getattr(self, name).setExpression(self.clean_html_text(expressions.get(name, "")))
         literals = data.get("attributes", {})
+        for name in NAME_INPUTS:
+            getattr(self, name).setText(self.clean_html_text(data.get("names", {}).get(name, "")))
         for prefix in ("", "singleLine"):
             for field, _ in ATTRIBUTE_INPUTS:
                 if field == "edaban":
@@ -399,8 +435,4 @@ class UavInputs:
         self.fileName.setFilePath(self.clean_html_text(output.get("directory")))
         self.backupQgz.setChecked(bool(output.get("backup_generated", False)))
         self.assignmentOlso.setFilePath(self.clean_html_text(output.get("assignment_ortho")))
-        mode = int(output.get("config_save_mode", 0))
-        self.isSaveConfig.setCurrentIndex(mode if mode in (0, 1, 2) else 0)
-        self.saveConfig.setFilePath(self.clean_html_text(output.get("config_file")))
-        self.update_save_config_enabled()
         return missing

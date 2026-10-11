@@ -45,10 +45,7 @@ class Main(UavWorkflow, QDockWidget, FORM_CLASS):
         self.submit_bt.clicked.connect(lambda: self.on_submit(test=False))
         self.testcalc_bt.clicked.connect(lambda: self.on_submit(test=True))
         self.readConfig.clicked.connect(self.load_config_dialog)
-        self.saveConfig.setFilter("設定ファイル (*.config)")
-        self.isSaveConfig.currentIndexChanged.connect(self.update_save_config_enabled)
         self.setup_uav_inputs()
-        self.update_save_config_enabled()
         QgsProject.instance().readProject.connect(self.restore_project_settings)
         self.restore_project_settings()
 
@@ -331,33 +328,8 @@ class Main(UavWorkflow, QDockWidget, FORM_CLASS):
                     return layer
         return None
 
-    def update_save_config_enabled(self, *_):
-        self.saveConfig.setEnabled(self.isSaveConfig.currentIndex() == 2)
-
-    def selected_config_output_path(self):
-        mode = self.isSaveConfig.currentIndex()
-        if mode == 0:
-            return None
-        if mode == 1:
-            return self.output_dir() / "input.config"
-
-        raw_path = self.saveConfig.filePath().strip()
-        if not raw_path:
-            raise ValueError("設定保存ファイルを指定してください")
-        path = Path(raw_path)
-        if path.suffix.lower() != ".config":
-            path = Path(f"{path}.config")
-            self.saveConfig.setFilePath(str(path))
-        return path
-
-    def save_config_file(self):
-        try:
-            path = self.selected_config_output_path()
-        except ValueError as e:
-            QMessageBox.warning(self, "エラー", str(e))
-            return False
-        if path is None:
-            return True
+    def save_config_file(self, path=None):
+        path = self.output_dir() / "input.config" if path is None else Path(path)
         if not path.parent.exists() or not path.parent.is_dir():
             QMessageBox.warning(self, "エラー", f"設定ファイルの保存先フォルダがありません:\n{path.parent}")
             return False

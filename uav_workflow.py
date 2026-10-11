@@ -3,6 +3,7 @@ import math
 import os
 import shutil
 import tempfile
+import uuid
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
@@ -55,10 +56,18 @@ class UavWorkflow(ProjectSession, UavInputs):
         self.progressBar.setValue(0)
         staging = None
         session = None
+        temporary_config = None
         closed = False
         original_project = QgsProject.instance().fileName()
         self._retained_output_paths = set()
         try:
+            if not test:
+                directory = self.fileName.filePath().strip()
+                if not directory:
+                    raise ValueError("出力先には存在するフォルダを指定してください")
+                temporary_config = Path(directory) / "input.tmp.config"
+                if not self.save_config_file(temporary_config):
+                    return
             create_project = self.outputMode.currentIndex() == 0
             if not test and create_project and not self.settle_project_edits():
                 return
@@ -83,7 +92,7 @@ class UavWorkflow(ProjectSession, UavInputs):
             self._final_output_dir = final
             self.export_uav()
             self.progressBar.setValue(80)
-            if self.isSaveConfig.currentIndex() == 1 and not self.save_config_file():
+            if not self.save_config_file():
                 return
             # Release OGR handles before replacing the package currently open in QGIS.
             if self._editable_projects is not None:
@@ -126,8 +135,11 @@ class UavWorkflow(ProjectSession, UavInputs):
                 return
             if closed:
                 closed = False
-            if self.isSaveConfig.currentIndex() != 1 and not self.save_config_file():
-                return
+            if temporary_config is not None:
+                try:
+                    temporary_config.unlink(missing_ok=True)
+                except OSError as error:
+                    self.append_output_log(f"仮設定ファイルを削除できません: {temporary_config}: {error}")
             self.append_output_log(f"出力を確定しました: {final}")
             self.progressBar.setValue(100)
         except Exception as error:
@@ -410,6 +422,7 @@ class UavWorkflow(ProjectSession, UavInputs):
                     continue
                 accepted_parts.append(part)
                 accepted.append((part, {"label": label, "source_id": attributes["source_id"],
+                                        UID: str(uuid.uuid5(uuid.UUID(attributes[UID]), part.asWkt(8))),
                                         "延長m": sum(line_lengths) if line_lengths else None,
                                         "calculation_label": "・".join(descriptions),
                                         "area_m2": part.area()}))
@@ -670,6 +683,14 @@ class UavWorkflow(ProjectSession, UavInputs):
                 if not ortho.isValid():
                     raise OSError("コピーしたオルソ画像を開けません")
             layers = [self.application_layer]
+            exclusion_labels = None
+            if drawing["kind"] == "申請区域" and self.exclusion_layer.featureCount():
+                exclusion_labels = self.exclusion_layer.clone()
+                # The application style already draws the excluded area.
+                # This layer supplies its labels without drawing it twice.
+                exclusion_labels.setRenderer(QgsSingleSymbolRenderer(QgsFillSymbol.createSimple(
+                    {"style": "no", "outline_style": "no"})))
+                layers.insert(0, exclusion_labels)
             if self.reference_layer is not None:
                 layers.insert(0, self.reference_layer)
             if ortho is not None:
@@ -688,6 +709,7 @@ class UavWorkflow(ProjectSession, UavInputs):
             captured = []
             for layer in layers:
                 key = ("output:references" if layer is self.reference_layer else
+                       "output:aggregate:exclusions" if layer is exclusion_labels else
                        "output:" + drawing["key"] if layer is self.application_layer else "input:" + source_key(self.olso.currentLayer()))
                 self._editable_projects.add_dataset(key, layer)
                 style = QgsMapLayerStyle()

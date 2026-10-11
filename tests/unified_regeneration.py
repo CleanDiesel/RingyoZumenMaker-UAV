@@ -14,7 +14,7 @@ project = QgsProject.instance()
 project.clear()
 qgz = output / "qgz" / widget.project_file_name()
 assert project.read(str(qgz))
-widget.singleLineName.setExpression('"name"')
+widget.singleLineNameOverride.setToProperty(QgsProperty.fromField("name"))
 assert widget.fileName.filePath() == str(output.resolve())
 assert widget.singleLine.currentLayer().featureCount() == 2, "Filtered-out inputs must still be saved"
 assert widget.singleLineFilter.expression() == '"width" = 2'

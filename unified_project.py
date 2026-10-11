@@ -11,6 +11,7 @@ from pathlib import Path
 
 from qgis.PyQt.QtCore import QDate, QVariant
 from qgis.PyQt.QtXml import QDomDocument
+from qgis.PyQt.QtWidgets import QMessageBox
 from qgis.core import (
     Qgis, QgsAuxiliaryLayer, QgsFeature, QgsField, QgsGeometry,
     QgsLayoutItemMap, QgsLayoutItemPicture, QgsLayerTreeModel,
@@ -259,9 +260,15 @@ class UnifiedProjects:
     def _auxiliary(self, layer):
         if not isinstance(layer, QgsVectorLayer) or not layer.labelsEnabled():
             return
-        field = layer.fields().field(UID if UID in layer.fields().names() else "fid")
         auxiliary = layer.auxiliaryLayer()
         if auxiliary is None:
+            names = layer.fields().names()
+            key = UID if UID in names else "fid" if "fid" in names else None
+            # External background layers may have no stored feature ID column.
+            # Keep their labels without adding our position storage.
+            if key is None:
+                return
+            field = layer.fields().field(key)
             auxiliary = self.project.auxiliaryStorage().createAuxiliaryLayer(field, layer)
             if auxiliary is not None:
                 layer.setAuxiliaryLayer(auxiliary)
@@ -276,8 +283,52 @@ class UnifiedProjects:
         settings.setDataDefinedProperties(properties)
         layer.labeling().setSettings(settings)
 
+    def label_visibility_warnings(self):
+        warnings = []
+        for capture in self.captures:
+            for _, dataset_key, _ in capture["layers"]:
+                if not dataset_key.startswith("output:"):
+                    continue
+                old = self.old_layers.get(dataset_key)
+                generated = self.datasets[self.aliases[dataset_key]]
+                if (old is None or not isinstance(generated, QgsVectorLayer)
+                        or "label" not in generated.fields().names()
+                        or "label" not in old.fields().names() or not generated.labelsEnabled()):
+                    continue
+                style_name = "図面:" + capture["key"]
+                manager = old.styleManager()
+                if style_name not in manager.styles():
+                    continue
+                probe = old.clone()
+                if manager.currentStyle() != style_name:
+                    manager.style(style_name).writeToLayer(probe)
+                if probe.labelsEnabled():
+                    continue
+                def text(value):
+                    return "" if QgsVariantUtils.isNull(value) else str(value).strip()
+                previous = {text(feature[UID]): text(feature["label"])
+                            for feature in old.getFeatures()} if UID in old.fields().names() else {}
+                previous_names = {text(feature["label"]) for feature in old.getFeatures()}
+                changed = any(text(feature["label"]) and
+                              (text(feature["label"]) != previous[text(feature[UID])]
+                               if text(feature[UID]) in previous else
+                               text(feature["label"]) not in previous_names)
+                              for feature in generated.getFeatures())
+                if changed and capture["title"] not in warnings:
+                    warnings.append(capture["title"])
+        return warnings
+
     def save(self):
         self.prepare_inputs()
+        warnings = self.label_visibility_warnings()
+        if warnings:
+            message = ("名称を変更しましたが、以前のラベル非表示設定が引き継がれます。\n"
+                       "次の図面では名称が表示されない可能性があります:\n"
+                       + "\n".join(warnings)
+                       + "\n\n表示する場合は、QGZで該当図面の地図テーマを適用し、"
+                       "レイヤのラベル表示を有効にしてください。")
+            self.owner.append_output_log(message)
+            QMessageBox.warning(self.owner, "名称変更時のラベル確認", message)
         tables, sources = self._write_data()
         project = self.project
         project.setFileName(str(self.project_path))

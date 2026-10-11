@@ -87,7 +87,7 @@ widget.kijunten.setLayer(reference_points)
 widget.kijuntenExp.setExpression('"name" IN (\'K1\', \'K2\')')
 widget.minKijuntenkan.setValue(20)
 for name in ("polygonName", "jochiName", "jochiNameSagyodo"):
-    getattr(widget, name).setExpression('"name"')
+    getattr(widget, name + "Override").setToProperty(QgsProperty.fromField("name"))
 for name, expression in (("shichoson", "'テスト町'"), ("rinpan", "12"), ("shohan", "60")):
     getattr(widget, name + "Override").setToProperty(QgsProperty.fromExpression(expression))
 widget.hukuin.setValue(2)
@@ -98,7 +98,6 @@ assert not hasattr(widget, "rinshohan")
 widget.shinseibango.setText("123-01")
 widget.seizusha2.setText("製図者")
 widget.sanrinshoyusha2.setText("所有者")
-widget.isSaveConfig.setCurrentIndex(1)
 widget.isIchizu.setChecked(True)
 assert widget.locationPaper.isEnabled()
 widget.isJochikeisan.setChecked(True)
@@ -198,7 +197,7 @@ assert widget.locationScale.scale() == 10000
 assert widget.paper.currentText() == "A4"
 assert widget.locationPaper.currentText() == "A3"
 assert widget.polygon.currentLayer() == polygons
-assert widget.polygonName.expression() == '"name"'
+assert widget.polygonNameOverride.toProperty().asExpression() == '"name"'
 assert widget.kijunten.currentLayer() == reference_points
 assert widget.kijuntenExp.expression() == '"name" IN (\'K1\', \'K2\')'
 assert widget.minKijuntenkan.value() == 20
@@ -250,9 +249,12 @@ else:
     raise AssertionError("self-intersection was not rejected")
 print("self-intersection rejection: OK")
 widget.polygon.setLayer(polygons)
-widget.polygonName.setExpression("")
-widget.jochiName.setExpression("")
-widget.jochiNameSagyodo.setExpression("")
+widget.polygonNameOverride.setToProperty(QgsProperty())
+widget.polygonName.setText("")
+widget.jochiNameOverride.setToProperty(QgsProperty())
+widget.jochiName.setText("")
+widget.jochiNameSagyodoOverride.setToProperty(QgsProperty())
+widget.jochiNameSagyodo.setText("")
 widget.validate_inputs()
 widget.calculate_uav()
 assert not widget.application_layer.labelsEnabled()
