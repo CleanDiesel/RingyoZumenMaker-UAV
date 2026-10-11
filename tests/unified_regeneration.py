@@ -158,7 +158,7 @@ assert widget.progressBar.value() == 100, messages
 assert not (fresh_output / "qgz").exists()
 assert not list(fresh_output.rglob("*.qgz")) and not list(fresh_output.rglob("*.gpkg"))
 assert (fresh_output / "index.html").is_file() and (fresh_output / "位置図/位置図.pdf").is_file()
-assert list(fresh_output.rglob("shp/*.shp"))
+assert list(fresh_output.rglob("シェープファイル/*/*.shp"))
 assert widget.configuration_data()["output"]["create_qgz"] is False
 restored = Main()
 restored.apply_configuration(widget.configuration_data())

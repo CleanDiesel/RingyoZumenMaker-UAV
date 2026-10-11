@@ -293,7 +293,7 @@ class UavWorkflow(ProjectSession, UavInputs):
         self.exclusion_terms = []
         self.excluded_small_parts = []
         self.application_layer = self.memory_polygon_layer(
-            "付帯作工物", [(geometry, attributes)], LINE_ATTRIBUTE_DEFINITIONS, "MultiLineString")
+            "付帯作工物", [(geometry, attributes)], self.application_field_definitions(True), "MultiLineString")
         self.original_layer = self.application_layer
         self.exclusion_layer = self.memory_polygon_layer("除地（なし）", [])
         self.result_layers = [self.application_layer]
@@ -443,13 +443,19 @@ class UavWorkflow(ProjectSession, UavInputs):
             (geometry, {**attributes, "area_m2": geometry.area()}) for geometry, attributes in polygons
         ])
         self.exclusion_layer = self.memory_polygon_layer("除地（採用部分）", accepted)
-        definitions = LINE_ATTRIBUTE_DEFINITIONS if single else ATTRIBUTE_DEFINITIONS
+        definitions = self.application_field_definitions(single)
         self.application_layer = self.memory_polygon_layer("区域" if single else "申請区域（除去後）", results, definitions)
         self.result_layers = [self.original_layer, self.exclusion_layer, self.application_layer]
         if self.reference_layer is not None:
             self.result_layers.append(self.reference_layer)
         self.apply_polygon_style(self.application_layer, "polygon.qml")
         self.apply_polygon_style(self.exclusion_layer, "exclusion_polygon.qml")
+
+    def application_field_definitions(self, single=False):
+        definitions = LINE_ATTRIBUTE_DEFINITIONS if single else ATTRIBUTE_DEFINITIONS
+        if not self.shinkokyoku_enabled("singleLine" if single else ""):
+            definitions = tuple(item for item in definitions if item[0] != "振興局")
+        return definitions
 
     def calculate_reference_points(self):
         self.reference_layer = None
@@ -672,7 +678,7 @@ class UavWorkflow(ProjectSession, UavInputs):
                                    if create_project else None)
         for index, drawing in enumerate(self.drawings, 1):
             self.activate_drawing(drawing)
-            self._drawing_output_dir = output / drawing["folder"]
+            self._drawing_output_dir = output / "シェープファイル" / Path(drawing["folder"]).name
             self._drawing_output_dir.mkdir(parents=True)
             ortho = self.olso.currentLayer()
             if ortho is not None and copied_ortho is not None and (
@@ -809,7 +815,7 @@ class UavWorkflow(ProjectSession, UavInputs):
         return target
 
     def export_shapefile(self):
-        directory = self.drawing_output_dir() / "shp"
+        directory = self.drawing_output_dir()
         directory.mkdir(parents=True, exist_ok=True)
         kind = self._current_drawing['kind']
         filename = f"{self.safe_file_name(self._current_drawing['title'])} - {kind}.shp"
@@ -819,6 +825,8 @@ class UavWorkflow(ProjectSession, UavInputs):
         definitions = list(ATTRIBUTE_DEFINITIONS)
         if self._current_drawing["kind"] != "申請区域":
             definitions = list(LINE_ATTRIBUTE_DEFINITIONS)
+        definitions = [item for item in definitions
+                       if item[0] != "振興局" or self.application_layer.fields().indexFromName(item[0]) >= 0]
         options.attributes = [self.application_layer.fields().indexFromName(field)
                               for field, _, _, _, _ in definitions]
         options.overrideGeometryType = (QgsWkbTypes.MultiLineString
@@ -831,15 +839,11 @@ class UavWorkflow(ProjectSession, UavInputs):
         )
         if result[0] != QgsVectorFileWriter.NoError:
             raise OSError(f"シェープファイル出力に失敗しました: {result[1]}")
-        # DBFはフィールド名が10バイトまで。正式名をQGISの別名に保持する。
         exported = QgsVectorLayer(str(directory / filename), "申請区域", "ogr")
-        exported.setRenderer(self.application_layer.renderer().clone())
         for field, alias, _, _, _ in definitions:
             index = exported.fields().indexFromName(field)
             if index < 0:
                 raise OSError(f"シェープファイル属性を保存できません: {field}")
-            exported.setFieldAlias(index, alias)
-        exported.saveNamedStyle(str((directory / filename).with_suffix(".qml")))
         self.append_output_log(f"シェープファイル: {self.displayed_output_path(directory / filename)}")
 
     def export_location(self):

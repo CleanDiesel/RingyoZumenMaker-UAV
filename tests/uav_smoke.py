@@ -156,7 +156,7 @@ for cluster in clusters:
 print("two visible red reference circles, diameter 2 mm: OK")
 blue = (pixels[:, :, 2] > 230) & (pixels[:, :, 0] < 40) & (pixels[:, :, 1] < 120)
 assert np.count_nonzero(blue) > 50, "Derived exclusion style was not rendered"
-shapefile = next((output / widget.drawings[0]["folder"] / "shp").glob("*.shp"))
+shapefile = next((output / "シェープファイル" / Path(widget.drawings[0]["folder"]).name).glob("*.shp"))
 shape = QgsVectorLayer(str(shapefile), "成果", "ogr")
 assert shape.isValid()
 assert shape.featureCount() == 2
@@ -234,7 +234,7 @@ widget.on_submit(test=False)
 assert widget.progressBar.value() == 100, messages
 assert (directory / "user-note.txt").is_file()
 batch = next((directory / "backup").iterdir())
-assert list((batch / "申請区域 - 全体" / "shp").glob("全体*.shp"))
+assert list((batch / "シェープファイル" / "申請区域 - 全体").glob("全体*.shp"))
 assert (directory / "位置図/位置図.pdf").is_file()
 print("backup and manual file preservation without basic compartment: OK")
 

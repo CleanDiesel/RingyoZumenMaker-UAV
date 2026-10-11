@@ -290,10 +290,21 @@ class UavInputs:
                 raise ValueError(f"{layer.name()} 地物ID={feature.id()}: 幅は0.01m以上で指定してください")
         return number
 
+    def shinkokyoku_enabled(self, prefix=""):
+        name = prefixed(prefix, "shinkokyoku")
+        button = getattr(self, name + "Override")
+        if button.isActive():
+            if prefix and button.toProperty().asExpression() == self.inheritance_expression("shinkokyoku"):
+                return self.shinkokyoku_enabled()
+            return True
+        return getattr(self, name).currentText() != "なし"
+
     def polygon_attributes(self, layer, feature, name, prefix=""):
         values = {}
         for field, alias in ATTRIBUTE_INPUTS:
             widget_name = prefixed(prefix, field)
+            if field == "shinkokyoku" and not self.shinkokyoku_enabled(prefix):
+                continue
             value = self.override_value(widget_name, layer, feature)
             if value is None or (isinstance(value, str) and not value.strip()):
                 value = None if alias in ("林班", "小班") else ""

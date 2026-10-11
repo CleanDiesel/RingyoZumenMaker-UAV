@@ -319,7 +319,7 @@ assert (output / "backup").is_dir()
 assert not (output / "共通").exists()
 assert not (output / "asset/QGISで図面を編集する方法.md").exists()
 assert not list(output.rglob("*.zip"))
-assert len(list(output.rglob("shp/*.shp"))) == 3
+assert len(list(output.rglob("シェープファイル/*/*.shp"))) == 3
 assert len(list(output.glob("qgz/*.qgz"))) == 1
 assert (output / "位置図/位置図.pdf").is_file()
 assert len(list(output.rglob("ringyo_zumen.gpkg"))) == 1
@@ -342,9 +342,12 @@ assert any("120 m" == text for text in html.xpath("//span[@data-latex]/text()"))
     "formulas": html.xpath("//@data-latex"),
     "titles": html.xpath("//div[@data-drawing]/@data-title"),
 }, ensure_ascii=False), encoding="utf-8")
+assert not list(output.rglob("*.qml"))
+assert not (output / "申請区域 - 全体").exists()
+assert not (output / "付帯作工物").exists()
 for drawing in widget.drawings:
-    folder = output / drawing["folder"]
-    shape = QgsVectorLayer(str(next((folder / "shp").glob("*.shp"))), "成果", "ogr")
+    folder = output / "シェープファイル" / Path(drawing["folder"]).name
+    shape = QgsVectorLayer(str(next(folder.glob("*.shp"))), "成果", "ogr")
     assert shape.isValid()
     assert shape.featureCount() == (2 if drawing["kind"] == "申請区域" else 1)
     fields = shape.fields().names()
@@ -434,7 +437,7 @@ print("real exports: 3 SHP, unified QGZ/4 themes, shared GPKG/PDF/ortho, no ZIP:
 # Backup named output folders, including manually added files, without an index.
 previous = widget.output_target_paths(output)
 assert not (output / ".ringyo_zumen_outputs.json").exists()
-manual = output / widget.drawings[1]["folder"] / "user-note.txt"
+manual = output / "シェープファイル" / Path(widget.drawings[1]["folder"]).name / "user-note.txt"
 manual.write_text("手動追加", encoding="utf-8")
 widget.singleLineNameOverride.setToProperty(QgsProperty.fromExpression("'新名称' || \"name\""))
 widget.singleLineFilter.setExpression('"width" = 2')
@@ -445,7 +448,7 @@ batch = next((output / "backup").iterdir())
 assert all((batch / relative).is_file() for relative in previous)
 assert not manual.exists()
 assert (batch / manual.relative_to(output)).read_text(encoding="utf-8") == "手動追加"
-assert len([path for path in output.rglob("shp/*.shp") if "backup" not in path.relative_to(output).parts]) == 2
+assert len([path for path in output.rglob("シェープファイル/*/*.shp") if "backup" not in path.relative_to(output).parts]) == 2
 assert not (batch / ".ringyo_zumen_outputs.json").exists()
 assert not (output / ".ringyo_zumen_outputs.json").exists()
 print("backup: named folders, renamed drawings and user additions, no output index: OK", flush=True)
@@ -578,8 +581,8 @@ print("backup failure rollback and unregistered file collision protection: OK", 
 # Without backup, remove obsolete files only inside named folders; ignore other configs.
 cleanup = output_root / "cleanup"
 cleanup.mkdir()
-(cleanup / "付帯作工物/旧図面/shp").mkdir(parents=True)
-(cleanup / "付帯作工物/旧図面/shp/old.shp").write_bytes(b"old shape")
+(cleanup / "シェープファイル/旧図面").mkdir(parents=True)
+(cleanup / "シェープファイル/旧図面/old.shp").write_bytes(b"old shape")
 (cleanup / "manual-folder").mkdir()
 (cleanup / "manual-folder/user.txt").write_text("user file", encoding="utf-8")
 (cleanup / "asset").mkdir()
@@ -597,11 +600,11 @@ try:
     assert not widget.commit_staged_output(cleanup_stage, cleanup, False)
 finally:
     main_module.os.replace = replace
-assert (cleanup / "付帯作工物/旧図面/shp/old.shp").is_file()
+assert (cleanup / "シェープファイル/旧図面/old.shp").is_file()
 assert (cleanup / "asset/old.png").is_file()
 assert (cleanup / "index.html").read_text(encoding="utf-8") == "old html"
 assert widget.commit_staged_output(cleanup_stage, cleanup, False)
-assert not (cleanup / "付帯作工物/旧図面").exists()
+assert not (cleanup / "シェープファイル/旧図面").exists()
 assert not (cleanup / "asset/old.png").exists()
 assert (cleanup / "manual-folder/user.txt").read_text(encoding="utf-8") == "user file"
 assert not (cleanup / ".ringyo_zumen_outputs.json").exists()
@@ -614,8 +617,8 @@ print("no-backup named-folder cleanup, other configs/files preserved, failure ro
 named = output_root / "named-targets"
 named.mkdir()
 for relative in ("index.html", "input.config", "asset/manual.txt", "qgz/custom.qgz",
-                 "位置図/任意.pdf", "オルソ/任意.tif", "申請区域 - 全体/shp/任意.dbf",
-                 "付帯作工物/任意/shp/任意.shp", "付帯作工物 - 旧名称/任意.txt",
+                 "位置図/任意.pdf", "オルソ/任意.tif", "シェープファイル/申請区域 - 全体/任意.dbf",
+                 "シェープファイル/付帯作工物 - 任意/任意.shp", "付帯作工物 - 旧名称/任意.txt",
                  "asset/other.config", "custom.config", "input-copy.config",
                  "other-folder/index.html", "backup/past/keep.txt"):
     item = named / relative
@@ -627,8 +630,8 @@ named_stage.mkdir()
 assert widget.commit_staged_output(named_stage, named, True)
 named_batch = next(p for p in (named / "backup").iterdir() if p.name != "past")
 for relative in ("index.html", "input.config", "asset/manual.txt", "qgz/custom.qgz",
-                 "位置図/任意.pdf", "オルソ/任意.tif", "申請区域 - 全体/shp/任意.dbf",
-                 "付帯作工物/任意/shp/任意.shp"):
+                 "位置図/任意.pdf", "オルソ/任意.tif", "シェープファイル/申請区域 - 全体/任意.dbf",
+                 "シェープファイル/付帯作工物 - 任意/任意.shp"):
     assert (named_batch / relative).read_text(encoding="utf-8") == relative
 for relative in ("asset/other.config", "custom.config", "input-copy.config", "other-folder/index.html", "backup/past/keep.txt", "付帯作工物 - 旧名称/任意.txt"):
     assert (named / relative).read_text(encoding="utf-8") == relative

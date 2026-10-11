@@ -397,6 +397,14 @@
              <layout class="QHBoxLayout" name="shinkokyokuInputLayout">
               <item>
                <widget class="QComboBox" name="shinkokyoku">
+                <property name="currentIndex">
+                 <number>1</number>
+                </property>
+                <item>
+                 <property name="text">
+                  <string>なし</string>
+                 </property>
+                </item>
                 <item>
                  <property name="text">
                   <string>石狩</string>
@@ -919,6 +927,14 @@
              <layout class="QHBoxLayout" name="singleLineShinkokyokuInputLayout">
               <item>
                <widget class="QComboBox" name="singleLineShinkokyoku">
+                <property name="currentIndex">
+                 <number>1</number>
+                </property>
+                <item>
+                 <property name="text">
+                  <string>なし</string>
+                 </property>
+                </item>
                 <item>
                  <property name="text">
                   <string>石狩</string>

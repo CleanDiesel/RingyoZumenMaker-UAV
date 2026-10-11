@@ -16,7 +16,7 @@ from .uav_workflow import UavWorkflow
 from .unified_project import checkpoint_package
 
 FORM_CLASS, _ = uic.loadUiType(str(Path(__file__).parent / "uav.ui"))
-OUTPUT_DIRECTORIES = ("asset", "qgz", "位置図", "オルソ", "申請区域 - 全体", "付帯作工物")
+OUTPUT_DIRECTORIES = ("asset", "qgz", "位置図", "オルソ", "シェープファイル")
 
 
 class Main(UavWorkflow, QDockWidget, FORM_CLASS):
