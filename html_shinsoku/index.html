@@ -80,7 +80,49 @@
         });
       });
 
+      // Measure in the actual browser/font; never clip long attribute values.
+      const originals = Array.from(document.querySelectorAll(".drawing-sheet"));
+      originals.forEach((sheet) => {
+        const table = sheet.querySelector(".attribute-table");
+        if (!table) return;
+        sheet.style.display = "block";
+        const factor = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--paper-factor")) || 1;
+        const mm = 96 / 25.4 * factor;
+        const rows = Array.from(table.tBodies[0].rows);
+        rows.forEach(row => row.remove());
+        let current = table;
+        let limit = 40 * mm;
+        let after = sheet;
+        rows.forEach((row) => {
+          current.tBodies[0].append(row);
+          if (current.getBoundingClientRect().height <= limit) return;
+          const next = document.createElement("div");
+          next.className = "drawing-sheet attribute-continuation";
+          next.dataset.drawing = sheet.dataset.drawing;
+          next.dataset.title = sheet.dataset.title + "（属性表 続き）";
+          next.append(sheet.querySelector("h1").cloneNode(true));
+          const header = sheet.querySelector(".info_container").cloneNode(true);
+          header.removeAttribute("id");
+          header.querySelectorAll("[id]").forEach(element => element.removeAttribute("id"));
+          next.append(header);
+          const area = document.createElement("div");
+          area.className = "sub_container";
+          const continued = table.cloneNode(false);
+          continued.append(table.querySelector("colgroup").cloneNode(true));
+          continued.append(table.tHead.cloneNode(true), document.createElement("tbody"));
+          area.append(continued);
+          next.append(area);
+          after.after(next);
+          next.style.display = "block";
+          continued.tBodies[0].append(row);
+          current = continued;
+          limit = 158 * mm;
+          after = next;
+        });
+        sheet.style.display = "";
+      });
       const sheets = Array.from(document.querySelectorAll(".drawing-sheet"));
+      sheets.forEach(sheet => sheet.style.display = "");
       sheets.forEach((sheet) => {
         const mapContainer = sheet.querySelector(".map_container");
         const toggle = sheet.querySelector(".map_visibility_toggle");

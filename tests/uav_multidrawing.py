@@ -8,7 +8,7 @@ from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
-BASE = Path(r"C:\Users\m48c7\AppData\Local\Programs\OSGeo4W")
+BASE = Path(os.environ.get("OSGEO4W_ROOT", Path(os.environ["LOCALAPPDATA"]) / "Programs/OSGeo4W"))
 dll_handles = [os.add_dll_directory(str(BASE / part)) for part in ("bin", "apps/Qt6/bin", "apps/qgis/bin")]
 sys.path[:0] = [str(BASE / "apps/qgis/python"), str(BASE / "apps/qgis/python/plugins"),
                str(Path(__file__).resolve().parents[2])]
@@ -97,6 +97,8 @@ for name, layer in (("polygon", polygons), ("jochiPolygon", exclusions), ("sagyo
                     ("singleLine", single_lines), ("kijunten", points), ("olso", ortho)):
     getattr(widget, name).setLayer(layer)
 for field, combo_name in widget._override_bindings.items():
+    if field in ("edaban", "singleLineEdaban"):
+        continue
     button = getattr(widget, field + "Override")
     combo = getattr(widget, combo_name)
     selected_layer = combo.currentLayer()
@@ -222,9 +224,9 @@ widget.calculate_uav()
 print("application header: duplicate compartments, per-feature overrides and NULLs: OK", flush=True)
 
 widget.activate_drawing(widget.drawings[1])
-assert widget.drawing_metadata()["name"] == "12林班60小班 道A"
-assert widget.compartment_name({"林班": 0, "小班": None, "枝番": "1"}, True) == "0林班（枝番1）"
-assert widget.compartment_name({"林班": None, "小班": None, "枝番": None}, True) == ""
+assert widget.drawing_metadata()["name"] == "12林班60小班（No.1） 道A"
+assert widget.compartment_name({"林班": 0, "小班": None, "No": 1}, True) == "0林班（No.1）"
+assert widget.compartment_name({"林班": None, "小班": None, "No": None}, True) == ""
 widget.activate_drawing(widget.drawings[0])
 
 # Headers include every application value and never borrow from the other tab.
@@ -326,9 +328,9 @@ assert len(list(output.rglob("ringyo_zumen.gpkg"))) == 1
 assert (output / "qgz/ringyo_zumen.gpkg").is_file()
 assert (output / "オルソ/12林班60小班 - オルソ.tif").is_file()
 html = ET.parse(str(output / "index.html"), ET.HTMLParser())
-assert len(html.xpath("//div[@class='drawing-sheet main_container']")) == 3
+assert len(html.xpath("//div[contains(concat(' ', normalize-space(@class), ' '), ' drawing-sheet ')]")) == 3
 assert html.xpath("//div[@data-drawing='1']//div[contains(@id, 'drawing_name')]/span/text()") == ["12林班60小班"]
-assert html.xpath("//div[@data-drawing='2']//div[contains(@id, 'drawing_name')]/span/text()") == ["12林班60小班 道A"]
+assert html.xpath("//div[@data-drawing='2']//div[contains(@id, 'drawing_name')]/span/text()") == ["12林班60小班（No.1） 道A"]
 ids = html.xpath("//@id")
 assert len(ids) == len(set(ids))
 assert "延長100m" in "".join(html.getroot().itertext())

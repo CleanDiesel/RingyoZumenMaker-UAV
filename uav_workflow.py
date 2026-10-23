@@ -25,6 +25,7 @@ from qgis.core import (
 from .unified_project import UnifiedProjects, UID, feature_uid, source_key, metadata, checkpoint_package
 from .project_session import ProjectSession
 from .uav_inputs import UavInputs
+from .drawing_output import DrawingOutput
 
 
 ROOT = Path(__file__).parent
@@ -33,7 +34,7 @@ ATTRIBUTE_DEFINITIONS = (
     ("市町村", "市町村名", QVariant.String, 80, 0),
     ("林班", "林班", QVariant.Int, 9, 0),
     ("小班", "小班", QVariant.Int, 9, 0),
-    ("枝番", "林小班枝番(No)", QVariant.String, 40, 0),
+    ("No", "No", QVariant.Int, 9, 0),
     ("製図日", "製図年月日", QVariant.Date, 0, 0),
     ("製図者", "製図者名", QVariant.String, 100, 0),
     ("所有者", "森林所有者名", QVariant.String, 100, 0),
@@ -49,8 +50,12 @@ LINE_ATTRIBUTE_DEFINITIONS = ATTRIBUTE_DEFINITIONS[:-3] + (
 )
 
 
-class UavWorkflow(ProjectSession, UavInputs):
+class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
     def on_submit(self, test=False):
+        if getattr(self, "_export_in_progress", False):
+            return
+        self._export_in_progress = True
+        self._content_widget.setEnabled(False)
         self.open_output_tab()
         self.clear_output_log()
         self.progressBar.setValue(0)
@@ -91,6 +96,8 @@ class UavWorkflow(ProjectSession, UavInputs):
             self._output_dir_override = staging
             self._final_output_dir = final
             self.export_uav()
+            if self.createZip.isChecked():
+                self.build_drawing_zip()
             self.progressBar.setValue(80)
             if not self.save_config_file():
                 return
@@ -135,6 +142,8 @@ class UavWorkflow(ProjectSession, UavInputs):
                 return
             if closed:
                 closed = False
+            if self.createZip.isChecked():
+                self.save_drawing_zip()
             if temporary_config is not None:
                 try:
                     temporary_config.unlink(missing_ok=True)
@@ -147,6 +156,10 @@ class UavWorkflow(ProjectSession, UavInputs):
             QMessageBox.warning(self, "エラー", str(error))
             self.progressBar.setValue(0)
         finally:
+            self._export_in_progress = False
+            self._content_widget.setEnabled(True)
+            if hasattr(self, "_pending_zip"):
+                self._pending_zip[0].unlink(missing_ok=True)
             if closed and self._project_snapshot:
                 QgsProject.instance().read(str(self._project_snapshot))
                 QgsProject.instance().setFileName(original_project)
@@ -156,7 +169,7 @@ class UavWorkflow(ProjectSession, UavInputs):
             # QGZのクローンレイヤを解放してから一時フォルダを片づける。
             if hasattr(self, "_editable_projects"):
                 self._editable_projects = None
-            for attribute in ("_output_dir_override", "_final_output_dir", "_drawing_output_dir", "_project_snapshot", "_export_map_scale", "_retained_output_paths"):
+            for attribute in ("_output_dir_override", "_final_output_dir", "_drawing_output_dir", "_project_snapshot", "_export_map_scale", "_retained_output_paths", "_pending_zip", "_zip_ortho"):
                 if hasattr(self, attribute):
                     delattr(self, attribute)
             if (staging is not None and staging.exists() and not staging.is_symlink()
@@ -241,10 +254,11 @@ class UavWorkflow(ProjectSession, UavInputs):
         polygons = []
         source = self.polygon.currentLayer()
         if source is not None:
-            for feature in self.selected_features("polygon", "polygonFilter"):
+            for number, feature in enumerate(self.selected_features("polygon", "polygonFilter"), 1):
                 geometry = self.checked_geometry(source, feature)
                 name = self.clean_html_text(self.evaluate_attribute("polygonName", source, feature)).strip()
                 polygons.append((geometry, self.polygon_attributes(source, feature, name)))
+                polygons[-1][1]["No"] = number
                 polygons[-1][1][UID] = feature_uid(source, feature)
         if polygons:
             exclusion_sources = []
@@ -276,6 +290,7 @@ class UavWorkflow(ProjectSession, UavInputs):
                 geometry = self.checked_geometry(source, feature)
                 name = self.clean_html_text(self.evaluate_attribute(combo_name + "Name", source, feature)).strip()
                 attributes = self.polygon_attributes(source, feature, name, combo_name)
+                attributes["No"] = index
                 attributes[UID] = feature_uid(source, feature)
                 if is_line:
                     width = self.numeric_override("singleLineWidth", source, feature)
@@ -350,9 +365,9 @@ class UavWorkflow(ProjectSession, UavInputs):
                 parts.append(f"{value}{field}")
         compartment = "".join(parts)
         if include_branch:
-            branch = attributes["枝番"]
+            branch = attributes["No"]
             if not QgsVariantUtils.isNull(branch) and str(branch).strip():
-                compartment += f"（枝番{branch}）"
+                compartment += f"（No.{branch}）"
         return compartment
 
     def header_values(self, values):
@@ -526,6 +541,9 @@ class UavWorkflow(ProjectSession, UavInputs):
         settings = labeling.settings() if labeling else QgsPalLayerSettings()
         settings.fieldName = "label"
         settings.isExpression = False
+        if layer.fields().indexFromName("No") >= 0:
+            settings.fieldName = "'No.' || to_string(\"No\") || CASE WHEN coalesce(\"label\", '') = '' THEN '' ELSE ' ' || \"label\" END"
+            settings.isExpression = True
         settings.geometryGeneratorEnabled = False
         settings.placement = Qgis.LabelPlacement.Line if is_line else Qgis.LabelPlacement.OutsidePolygons
         settings.dist = 1.5
@@ -552,7 +570,8 @@ class UavWorkflow(ProjectSession, UavInputs):
         text_format.setBuffer(buffer)
         settings.setFormat(text_format)
         layer.setLabeling(QgsVectorLayerSimpleLabeling(settings))
-        layer.setLabelsEnabled(any(self.clean_html_text(feature["label"]).strip() for feature in layer.getFeatures()))
+        layer.setLabelsEnabled(layer.fields().indexFromName("No") >= 0 or
+                               any(self.clean_html_text(feature["label"]).strip() for feature in layer.getFeatures()))
 
     def log_calculation(self):
         if self.reference_layer is not None:
@@ -574,13 +593,14 @@ class UavWorkflow(ProjectSession, UavInputs):
         return 420 / 297 if self.paper.currentText() == "A3" else 1.0
 
     def create_uav_layout(self, layers):
-        size = 150 * self.paper_factor()
+        width = 177 * self.paper_factor()
+        height = (110 if self.drawing_has_table() else 150) * self.paper_factor()
         layout = QgsPrintLayout(QgsProject.instance())
         layout.initializeDefaults()
-        layout.pageCollection().page(0).setPageSize(QgsLayoutSize(size, size))
+        layout.pageCollection().page(0).setPageSize(QgsLayoutSize(width, height))
         map_item = QgsLayoutItemMap(layout)
         layout.addLayoutItem(map_item)
-        map_item.attemptResize(QgsLayoutSize(size, size))
+        map_item.attemptResize(QgsLayoutSize(width, height))
         map_item.attemptMove(QgsLayoutPoint(0, 0))
         self.set_map_extent(map_item, layers)
         layout.renderContext().setDpi(300)
@@ -674,6 +694,7 @@ class UavWorkflow(ProjectSession, UavInputs):
             self.shared_output_dir().mkdir(exist_ok=True)
         sheets = []
         copied_ortho = self.copy_assignment_ortho()
+        self._zip_ortho = copied_ortho
         self._editable_projects = (UnifiedProjects(self, output, getattr(self, "_project_snapshot", None), copied_ortho)
                                    if create_project else None)
         for index, drawing in enumerate(self.drawings, 1):
@@ -1029,6 +1050,32 @@ class UavWorkflow(ProjectSession, UavInputs):
         sheet.set("class", "drawing-sheet")
         sheet.set("data-drawing", str(index))
         sheet.set("data-title", self._current_drawing["folder"])
+        if self.drawing_has_table():
+            sheet.set("class", "drawing-sheet has-attribute-table")
+            container = sheet.xpath(".//*[@id='map_container']")[0]
+            table = ET.SubElement(container, "table", {"class": "attribute-table"})
+            definitions = LINE_ATTRIBUTE_DEFINITIONS if single else ATTRIBUTE_DEFINITIONS
+            definitions = [definition for definition in definitions
+                           if self.application_layer.fields().indexFromName(definition[0]) >= 0]
+            weights = {"振興局": 7, "市町村": 8, "林班": 4, "小班": 4, "No": 4,
+                       "製図日": 10, "製図者": 10, "所有者": 15, "事業": 5,
+                       "申請No": 10, "面積ha": 8, "申請ha": 7, "更新ha": 7, "幅m": 7, "延長m": 7}
+            total = sum(weights[field] for field, *_ in definitions)
+            columns = ET.SubElement(table, "colgroup")
+            for field, *_ in definitions:
+                ET.SubElement(columns, "col", style=f"width:{weights[field] / total * 100:.3f}%")
+            head = ET.SubElement(ET.SubElement(table, "thead"), "tr")
+            for field, _, _, _, _ in definitions:
+                ET.SubElement(head, "th").text = field
+            body = ET.SubElement(table, "tbody")
+            for feature in self.application_layer.getFeatures():
+                row = ET.SubElement(body, "tr")
+                for field, _, kind, _, precision in definitions:
+                    value = feature[field]
+                    text = ("" if QgsVariantUtils.isNull(value) else
+                            value.toString("yyyy/MM/dd") if isinstance(value, QDate) else
+                            f"{value:.{precision}f}" if kind == QVariant.Double else str(value))
+                    ET.SubElement(row, "td").text = text
         sheet.xpath(".//img[contains(@class, 'main_map')]")[0].set("src", f"asset/{map_filename}")
         # Classes keep the shared CSS; unique IDs prevent cross-drawing controls.
         for element in sheet.iter():

@@ -58,7 +58,7 @@ class ProjectSession:
         if not maps:
             raise ValueError("レイアウトに地図がありません")
         item = max(maps, key=lambda item: item.sizeWithUnits().width() * item.sizeWithUnits().height())
-        return item.scale() * layout.pageCollection().page(0).pageSize().width() / (150 * self.paper_factor())
+        return item.scale() * layout.pageCollection().page(0).pageSize().width() / (177 * self.paper_factor())
 
     def restore_project_settings(self, *_):
         project = QgsProject.instance()

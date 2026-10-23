@@ -552,7 +552,7 @@
             <item row="4" column="0">
              <widget class="QLabel" name="label_20">
               <property name="text">
-               <string>林小班枝番</string>
+               <string>No（自動採番）</string>
               </property>
              </widget>
             </item>
@@ -1082,7 +1082,7 @@
             <item row="4" column="0">
              <widget class="QLabel" name="singleLineLabel_20">
               <property name="text">
-               <string>林小班枝番</string>
+               <string>No（自動採番）</string>
               </property>
              </widget>
             </item>

@@ -235,7 +235,7 @@ class Main(UavWorkflow, QDockWidget, FORM_CLASS):
                 continue
             for entry in directory.rglob("*"):
                 relative = entry.relative_to(output_dir)
-                if entry.suffix.lower() == ".config":
+                if entry.suffix.lower() in (".config", ".zip") or entry.name.startswith(".ringyo_zip_"):
                     continue
                 if self.safe_output_file(output_dir, relative) is not None:
                     paths.add(relative)

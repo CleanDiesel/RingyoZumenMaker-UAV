@@ -470,6 +470,23 @@ class UnifiedProjects:
                     if old_layout is not None and not item.customProperty("rz/generated_map", False):
                         continue
                     item.setCustomProperty("rz/generated_map", True)
+                    if capture["drawing"] is not None:
+                        # Keep the edited center/scale while matching the HTML's physical map size.
+                        from qgis.core import QgsLayoutSize
+                        scale = item.scale()
+                        center = item.extent().center()
+                        factor = self.owner.paper_factor()
+                        width = 177 * factor
+                        height = (110 if self.owner._drawing_tables.get(key, True) else 150) * factor
+                        layout.pageCollection().page(0).setPageSize(QgsLayoutSize(width, height))
+                        item.attemptResize(QgsLayoutSize(width, height))
+                        item.setScale(scale)
+                        extent = item.extent()
+                        extent.setXMinimum(center.x() - extent.width() / 2)
+                        extent.setXMaximum(center.x() + item.extent().width() / 2)
+                        extent.setYMinimum(center.y() - extent.height() / 2)
+                        extent.setYMaximum(center.y() + item.extent().height() / 2)
+                        item.setExtent(extent)
                     # Theme changes in the canvas cannot alter this map's extent/scale/rotation.
                     item.setLayers(visible)
                     item.setKeepLayerSet(False)

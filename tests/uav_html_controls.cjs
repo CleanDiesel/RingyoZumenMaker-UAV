@@ -11,6 +11,7 @@ class Element {
     this.tag = tag;
     this.children = [];
     this.dataset = {};
+    this.style = {};
     this.listeners = {};
     this.classes = new Set();
     this.classList = {toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name)};
@@ -28,7 +29,8 @@ const sheets = fixture.titles.map(title => {
   sheet.map = new Element();
   sheet.toggle = new Element('input');
   sheet.toggle.checked = true;
-  sheet.querySelector = selector => selector === '.map_container' ? sheet.map : sheet.toggle;
+  sheet.querySelector = selector => selector === '.map_container' ? sheet.map :
+    selector === '.map_visibility_toggle' ? sheet.toggle : null;
   return sheet;
 });
 const formulas = fixture.formulas.map(latex => ({dataset: {latex}}));

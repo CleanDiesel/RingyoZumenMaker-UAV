@@ -111,6 +111,11 @@ class UavInputs:
         self.tabWidget.setCurrentIndex(0)
         self.result_layers = []
         self.drawings = []
+        self.setup_drawing_output()
+        # No is assigned automatically; retain legacy widgets for old config loading only.
+        for name in ("edaban", "edabanOverride", "singleLineEdaban", "singleLineEdabanOverride"):
+            getattr(self, name).setEnabled(False)
+            getattr(self, name).setToolTip("Noは対象地物の順に自動採番します。")
 
     @staticmethod
     def bind_expression_layer(widget, layer):
@@ -203,6 +208,10 @@ class UavInputs:
         return self.input_value(widget)
 
     def update_override_enabled(self, field):
+        if field in ("edaban", "singleLineEdaban"):
+            getattr(self, field).setEnabled(False)
+            getattr(self, field + "Override").setEnabled(False)
+            return
         combo = getattr(self, self._override_bindings[field])
         button = getattr(self, field + "Override")
         available = combo.currentLayer() is not None
@@ -302,6 +311,8 @@ class UavInputs:
     def polygon_attributes(self, layer, feature, name, prefix=""):
         values = {}
         for field, alias in ATTRIBUTE_INPUTS:
+            if field == "edaban":
+                continue
             widget_name = prefixed(prefix, field)
             if field == "shinkokyoku" and not self.shinkokyoku_enabled(prefix):
                 continue
@@ -382,6 +393,8 @@ class UavInputs:
             "names": {name: getattr(self, name).text() for name in NAME_INPUTS},
             "overrides": {name: getattr(self, name + "Override").toProperty().toVariant() for name in self._override_bindings},
             "output": {"directory": self.fileName.filePath(), "backup_generated": self.backupQgz.isChecked(),
+                       "drawing_tables": dict(self._drawing_tables),
+                       "create_zip": self.createZip.isChecked(), "zip_directory": self.zipDirectory.text(),
                        "create_qgz": self.outputMode.currentIndex() == 0,
                        "assignment_ortho": self.assignmentOlso.filePath()},
         }
@@ -442,6 +455,9 @@ class UavInputs:
             getattr(self, name + "Override").setToProperty(prop)
             self.update_override_enabled(name)
         output = data.get("output", {})
+        self._drawing_tables = dict(output.get("drawing_tables", {}))
+        self.createZip.setChecked(bool(output.get("create_zip", False)))
+        self.zipDirectory.setText(self.clean_html_text(output.get("zip_directory", "")))
         self.outputMode.setCurrentIndex(0 if output.get("create_qgz", True) else 1)
         self.fileName.setFilePath(self.clean_html_text(output.get("directory")))
         self.backupQgz.setChecked(bool(output.get("backup_generated", False)))
