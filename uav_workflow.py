@@ -594,7 +594,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
 
     def create_uav_layout(self, layers):
         width = 177 * self.paper_factor()
-        height = (110 if self.drawing_has_table() else 150) * self.paper_factor()
+        height = 150 * self.paper_factor()
         layout = QgsPrintLayout(QgsProject.instance())
         layout.initializeDefaults()
         layout.pageCollection().page(0).setPageSize(QgsLayoutSize(width, height))
@@ -630,8 +630,23 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                 not frame_extent.contains(feature.geometry().asPoint())
                 for feature in self.reference_layer.getFeatures()):
             raise ValueError("指定縮尺では基準点が地図枠の外になります。縮尺の分母を大きくしてください")
-        if not frame_extent.contains(extent):
-            self.append_output_log("指定縮尺では区域の一部が地図枠の外になります。縮尺の分母を大きくしてください。")
+        if scale is not None and not frame_extent.contains(extent):
+            raise ValueError("指定縮尺では位置図が大枠を超えます。縮尺の分母を大きくしてください。")
+
+    def render_drawing_image(self, layout):
+        from .map_frame import validate_drawing_frame, occupied_bottom
+        maps = [item for item in layout.items() if isinstance(item, QgsLayoutItemMap)]
+        if not maps:
+            raise ValueError("レイアウトに地図がありません")
+        maps = [item for item in maps if item.customProperty("rz/generated_map", False)] or maps
+        main_map = max(maps, key=lambda item: item.sizeWithUnits().width() * item.sizeWithUnits().height())
+        validate_drawing_frame(self, main_map)
+        with self.export_layer_context(layout):
+            image = QgsLayoutExporter(layout).renderPageToImage(0, dpi=300)
+        if image.isNull():
+            raise OSError("地図PNGの出力に失敗しました")
+        self._image_content_bottom = occupied_bottom(image, self.olso.currentLayer() is not None)
+        return image
 
     def drawing_output_dir(self):
         return self._drawing_output_dir
@@ -725,8 +740,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
             layout = self.create_uav_layout(layers)
             map_path = output / "asset" / f"drawing_{index}_map.png"
             if not create_project:
-                with self.export_layer_context(layout):
-                    image = QgsLayoutExporter(layout).renderPageToImage(0, dpi=300)
+                image = self.render_drawing_image(layout)
                 if image.isNull() or not image.save(str(map_path), "PNG"):
                     raise OSError("地図PNGの出力に失敗しました")
                 self._export_map_scale = self.layout_display_scale(layout)
@@ -764,8 +778,8 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                 if QgsLayoutExporter(layout).exportToPdf(str(target), QgsLayoutExporter.PdfExportSettings()) != QgsLayoutExporter.Success:
                     raise OSError("位置図PDFの出力に失敗しました")
             else:
-                with self.export_layer_context(layout):
-                    image = QgsLayoutExporter(layout).renderPageToImage(0, dpi=300)
+                self.activate_drawing(by_key[item["key"]])
+                image = self.render_drawing_image(layout)
                 if image.isNull() or not image.save(str(target), "PNG"):
                     raise OSError("地図PNGの出力に失敗しました")
                 self.activate_drawing(by_key[item["key"]])
@@ -1077,6 +1091,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                             f"{value:.{precision}f}" if kind == QVariant.Double else str(value))
                     ET.SubElement(row, "td").text = text
         sheet.xpath(".//img[contains(@class, 'main_map')]")[0].set("src", f"asset/{map_filename}")
+        sheet.xpath(".//*[@id='map']")[0].set("data-content-bottom", str(getattr(self, "_image_content_bottom", 1.0)))
         # Classes keep the shared CSS; unique IDs prevent cross-drawing controls.
         for element in sheet.iter():
             if element.get("id"):

@@ -13,6 +13,7 @@ const {chromium} = require('playwright');
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(pathToFileURL(path.resolve(process.argv[2])).href);
+    await page.waitForFunction(() => document.documentElement.dataset.layoutReady === "1");
     await page.emulateMedia({media: 'print'});
     await page.evaluate(() => document.body.dataset.printAll = '1');
     const result = await page.evaluate(() => {
@@ -24,7 +25,7 @@ const {chromium} = require('playwright');
         tables: tables.map(table => ({
           headers: table.tHead.rows.length,
           fits: table.getBoundingClientRect().height <=
-            (table.closest('.attribute-continuation') ? 158 : 40) * mm + 1,
+            table.parentElement.clientHeight + 1,
           fullWidth: Math.abs(table.getBoundingClientRect().width -
             table.parentElement.clientWidth) < 2,
         })),

@@ -82,7 +82,7 @@ class DrawingOutput:
         dialog = QDialog(self)
         dialog.setWindowTitle("図面ごとの属性表")
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("チェックした図面の写真下に属性表を表示します。"))
+        layout.addWidget(QLabel("チェックした図面の枠の最下部に属性表を表示します。地図と重なる場合は次ページへ移します。"))
         listing = QListWidget()
         for key, name in candidates:
             item = QListWidgetItem(name, listing)

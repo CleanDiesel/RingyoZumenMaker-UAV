@@ -57,6 +57,7 @@ class ProjectSession:
         maps = [item for item in layout.items() if isinstance(item, QgsLayoutItemMap)]
         if not maps:
             raise ValueError("レイアウトに地図がありません")
+        maps = [item for item in maps if item.customProperty("rz/generated_map", False)] or maps
         item = max(maps, key=lambda item: item.sizeWithUnits().width() * item.sizeWithUnits().height())
         return item.scale() * layout.pageCollection().page(0).pageSize().width() / (177 * self.paper_factor())
 

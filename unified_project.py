@@ -472,14 +472,15 @@ class UnifiedProjects:
                     item.setCustomProperty("rz/generated_map", True)
                     if capture["drawing"] is not None:
                         # Keep the edited center/scale while matching the HTML's physical map size.
-                        from qgis.core import QgsLayoutSize
+                        from qgis.core import QgsLayoutSize, QgsLayoutPoint
                         scale = item.scale()
                         center = item.extent().center()
                         factor = self.owner.paper_factor()
                         width = 177 * factor
-                        height = (110 if self.owner._drawing_tables.get(key, True) else 150) * factor
+                        height = 150 * factor
                         layout.pageCollection().page(0).setPageSize(QgsLayoutSize(width, height))
                         item.attemptResize(QgsLayoutSize(width, height))
+                        item.attemptMove(QgsLayoutPoint(0, 0))
                         item.setScale(scale)
                         extent = item.extent()
                         extent.setXMinimum(center.x() - extent.width() / 2)
