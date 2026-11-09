@@ -57,6 +57,15 @@ h1 { text-align: center; font: 7mm 'Yu Mincho', serif; padding-top: calc(15mm * 
 .deduction-description { min-width: 0; overflow-wrap: anywhere; text-align: right; }
 .deduction-description-token { display: inline-block; max-width: 100%; }
 .deduction-total { padding-top: 1mm; }
+/* Use available space before sending a slightly long calculation to a new page.
+   Keep font sizes and all map dimensions unchanged. */
+.xy_container.calculations-compact { gap: 4mm; }
+.calculations-compact .calc { line-height: 1.4; }
+.calculations-compact .calc-heading { margin-bottom: 2mm; padding-bottom: 1mm; }
+.calculations-compact .calc_area { gap: 2mm; }
+.calculations-compact .calc-label { margin-bottom: 1mm; }
+.calculations-compact .calc-application { padding-top: 3mm; }
+.calculations-compact .calc-deduction { gap: 1mm; }
 .latex-flow { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: .15em .35em; }
 .latex-part { flex: 0 0 auto; max-width: 100%; overflow-wrap: anywhere; }
 .katex { font-size: 1em; }
@@ -77,15 +86,18 @@ h1 { text-align: center; font: 7mm 'Yu Mincho', serif; padding-top: calc(15mm * 
 .main_map { display: block; width: 100%; height: 100%; }
 .attribute-table { width: 100%; table-layout: fixed; border-collapse: collapse; font: 3mm 'Yu Mincho', 'Times New Roman', serif; }
 .map_container > .attribute-table, .attribute-frame > .attribute-table { position: absolute; bottom: 0; left: 0; width: 100%; }
-.attribute-frame { position: relative; width: 100%; height: calc(158mm * var(--paper-factor)); border: .7mm solid black; }
+.attribute-frame { position: relative; height: calc(158mm * var(--paper-factor)); border: .7mm solid black; }
 .main_map { max-width: none; }
 @media print { .main_map { width: 100%; height: 100%; } }
 .attribute-table th, .attribute-table td { border: .2mm solid #444; padding: .6mm .3mm; overflow-wrap: anywhere; white-space: normal; text-align: center; vertical-align: middle; }
 .attribute-table th { font-weight: bold; background: #f1f1f1; }
 .attribute-table tr { break-inside: avoid; }
-.attribute-continuation .sub_container { display: block; }
+.attribute-continuation .sub_container { display: flex; }
 .attribute-continuation .attribute-table { width: 100%; }
 .attribute-continuation .attribute-table td { text-align: left; }
+.calculation-continuation .sub_container { display: flex; }
+.calculation-units { display: flex; flex-direction: column; gap: 2mm; }
+.calculation-notice { font-size: 3mm; }
 .houi { position: absolute; top: 0; left: 0; width: 13mm; z-index: 1; }
 .map_visibility_control {
   position: absolute; top: 1.5mm; left: 1.5mm; z-index: 10; padding: 1mm 1.5mm;

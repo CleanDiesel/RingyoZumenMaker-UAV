@@ -4,12 +4,14 @@ from decimal import Decimal
 from pathlib import Path
 
 from qgis.PyQt.QtCore import QDate, QDateTime, QCoreApplication
-from qgis.PyQt.QtWidgets import QComboBox, QDateEdit, QLineEdit, QAbstractSpinBox
+from qgis.PyQt.QtWidgets import QComboBox, QDateEdit, QLineEdit, QAbstractSpinBox, QSpinBox
 from qgis.core import (
     Qgis, QgsCoordinateReferenceSystem, QgsExpression, QgsExpressionContext,
     QgsExpressionContextGenerator, QgsExpressionContextUtils, QgsMapLayerProxyModel,
-    QgsProperty, QgsPropertyDefinition, QgsVariantUtils,
+    QgsProperty, QgsPropertyDefinition, QgsVariantUtils, QgsProviderRegistry,
 )
+from .output_folder import OutputFolder
+from qgis.gui import QgsFieldExpressionWidget
 
 
 CONFIG_VERSION = 7
@@ -19,17 +21,17 @@ NAME_INPUTS = {"polygonName": "polygon", "jochiName": "jochiPolygon",
 
 ATTRIBUTE_INPUTS = (
     ("shinkokyoku", "振興局"), ("shichoson", "市町村"), ("rinpan", "林班"),
-    ("shohan", "小班"), ("edaban", "枝番"), ("jigyoCode", "事業"),
+    ("shohan", "小班"), ("edaban", "No"), ("jigyoCode", "事業"),
     ("seizujigyosha", "製図事業者"), ("shinseibango", "申請No"),
     ("seizubi2", "製図日"), ("seizusha2", "製図者"), ("sanrinshoyusha2", "所有者"),
 )
 OVERRIDE_FIELDS = tuple(field for field, _ in ATTRIBUTE_INPUTS)
 LAYER_INPUTS = {
-    "polygon": (QgsMapLayerProxyModel.PolygonLayer, ("polygonFilter", "edaban")),
-    "jochiPolygon": (QgsMapLayerProxyModel.PolygonLayer, ("jochiFilter",)),
-    "sagyodoLine": (QgsMapLayerProxyModel.LineLayer, ("sagyodoFilter",)),
+    "polygon": (QgsMapLayerProxyModel.PolygonLayer, ("polygonFilter",)),
+    "jochiPolygon": (QgsMapLayerProxyModel.PolygonLayer, ("jochiFilter", "jochiPriority")),
+    "sagyodoLine": (QgsMapLayerProxyModel.LineLayer, ("sagyodoFilter", "sagyodoPriority")),
     "singleLine": (QgsMapLayerProxyModel.LineLayer,
-                   ("singleLineFilter", "singleLineEdaban")),
+                   ("singleLineFilter",)),
     "kijunten": (QgsMapLayerProxyModel.PointLayer, ("kijuntenExp",)),
     "olso": (QgsMapLayerProxyModel.RasterLayer, ()),
 }
@@ -53,10 +55,17 @@ class LayerExpressionContext(QgsExpressionContextGenerator):
         return context
 
 
-class UavInputs:
+class UavInputs(OutputFolder):
     def setup_uav_inputs(self):
         self._override_bindings = {}
         self._expression_contexts = []
+        self.exclusionOverlap = QComboBox()
+        self.exclusionOverlap.addItems(["統合", "排他"])
+        self.jochiPriority = QgsFieldExpressionWidget()
+        self.sagyodoPriority = QgsFieldExpressionWidget()
+        self.formLayout_8.insertRow(0, "重複部分の扱い", self.exclusionOverlap)
+        self.formLayout_8.insertRow(6, "優先順位（ポリゴン）", self.jochiPriority)
+        self.formLayout_8.addRow("優先順位（ライン）", self.sagyodoPriority)
         for combo_name, (layer_filter, expressions) in LAYER_INPUTS.items():
             combo = getattr(self, combo_name)
             combo.setFilters(layer_filter)
@@ -112,10 +121,29 @@ class UavInputs:
         self.result_layers = []
         self.drawings = []
         self.setup_drawing_output()
-        # No is assigned automatically; retain legacy widgets for old config loading only.
-        for name in ("edaban", "edabanOverride", "singleLineEdaban", "singleLineEdabanOverride"):
-            getattr(self, name).setEnabled(False)
-            getattr(self, name).setToolTip("Noは対象地物の順に自動採番します。")
+        self.setup_output_folder()
+        self.distanceDecimals = QSpinBox()
+        self.distanceDecimals.setRange(0, 9)
+        self.distanceDecimals.setValue(2)
+        self.formLayout_4.addRow("距離（m）表示の小数桁数", self.distanceDecimals)
+        self._auto_assignment_path = ""
+        self.olso.layerChanged.connect(self.autofill_assignment_ortho)
+
+    def autofill_assignment_ortho(self, layer):
+        """Suggest the selected local raster path; never put a remote URI in a file input."""
+        previous = getattr(self, "_auto_assignment_path", "")
+        local = ""
+        if layer is not None:
+            decoded = QgsProviderRegistry.instance().decodeUri(layer.providerType(), layer.source())
+            raw = decoded.get("path") or layer.source().split("|", 1)[0]
+            path = Path(raw)
+            if path.is_file() and path.suffix.lower() in (".tif", ".tiff", ".jpg", ".jpeg", ".png", ".jp2", ".ecw", ".img"):
+                local = str(path.resolve())
+        if local:
+            self.assignmentOlso.setFilePath(local)
+        elif self.assignmentOlso.filePath() == previous:
+            self.assignmentOlso.setFilePath("")
+        self._auto_assignment_path = local
 
     @staticmethod
     def bind_expression_layer(widget, layer):
@@ -129,7 +157,7 @@ class UavInputs:
 
     def setup_override(self, field, combo_name):
         button = getattr(self, field + "Override")
-        numeric = field in ("rinpan", "shohan",
+        numeric = field in ("rinpan", "shohan", "edaban", "singleLineEdaban",
                             "singleLineRinpan", "singleLineShohan", "hukuin", "singleLineWidth")
         kind = QgsPropertyDefinition.StandardPropertyTemplate.Double if numeric else QgsPropertyDefinition.StandardPropertyTemplate.String
         definition = QgsPropertyDefinition(field, field, kind)
@@ -208,10 +236,6 @@ class UavInputs:
         return self.input_value(widget)
 
     def update_override_enabled(self, field):
-        if field in ("edaban", "singleLineEdaban"):
-            getattr(self, field).setEnabled(False)
-            getattr(self, field + "Override").setEnabled(False)
-            return
         combo = getattr(self, self._override_bindings[field])
         button = getattr(self, field + "Override")
         available = combo.currentLayer() is not None
@@ -257,6 +281,18 @@ class UavInputs:
             value = self.override_value(widget_name, layer, feature)
             return default if value is None or QgsVariantUtils.isNull(value) else value
         return self.evaluate_expression(getattr(self, widget_name).expression(), layer, feature, widget_name, default)
+
+    def exclusion_priority(self, widget_name, layer, feature):
+        value = self.evaluate_attribute(widget_name, layer, feature, None)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        try:
+            number = Decimal(str(value))
+            if not number.is_finite() or number < 1 or number != number.to_integral_value():
+                raise ValueError()
+            return int(number)
+        except (ValueError, TypeError, ArithmeticError):
+            raise ValueError(f"{layer.name()} 地物ID={feature.id()}: 優先順位は1以上の自然数または空欄で指定してください")
 
     def override_value(self, name, layer, feature):
         button = getattr(self, name + "Override")
@@ -311,15 +347,13 @@ class UavInputs:
     def polygon_attributes(self, layer, feature, name, prefix=""):
         values = {}
         for field, alias in ATTRIBUTE_INPUTS:
-            if field == "edaban":
-                continue
             widget_name = prefixed(prefix, field)
             if field == "shinkokyoku" and not self.shinkokyoku_enabled(prefix):
                 continue
             value = self.override_value(widget_name, layer, feature)
             if value is None or (isinstance(value, str) and not value.strip()):
                 value = None if alias in ("林班", "小班") else ""
-            if alias in ("林班", "小班"):
+            if alias in ("林班", "小班", "No"):
                 if value is None:
                     values[alias] = None
                     continue
@@ -371,8 +405,6 @@ class UavInputs:
         literals = {}
         for prefix in ("", "singleLine"):
             for field, _ in ATTRIBUTE_INPUTS:
-                if field == "edaban":
-                    continue
                 name = prefixed(prefix, field)
                 value = self.input_value(getattr(self, name))
                 literals[name] = value.toString("yyyy-MM-dd") if isinstance(value, QDate) else value
@@ -382,6 +414,8 @@ class UavInputs:
                     "paper": self.paper.currentText(), "location_paper": self.locationPaper.currentText(),
                     "show_deduction": self.isJochikeisan.isChecked(),
                     "area_display_decimals": self.areaDecimals.value(), "hectare_display_decimals": self.haDecimals.value(),
+                    "distance_display_decimals": self.distanceDecimals.value(),
+                    "exclusion_overlap": "exclusive" if self.exclusionOverlap.currentIndex() == 1 else "union",
                     "create_location_map": self.isIchizu.isChecked(), "location_direction": self.ichizuDirection.currentIndex(),
                     "location_scale": self.locationScale.scale(), "minimum_exclusion_area_a": self.minJochi.value(),
                     "road_width_m": self.hukuin.value(), "single_line_width_m": self.singleLineWidth.value(),
@@ -392,7 +426,8 @@ class UavInputs:
             "attributes": literals,
             "names": {name: getattr(self, name).text() for name in NAME_INPUTS},
             "overrides": {name: getattr(self, name + "Override").toProperty().toVariant() for name in self._override_bindings},
-            "output": {"directory": self.fileName.filePath(), "backup_generated": self.backupQgz.isChecked(),
+            "output": {"directory": self.fileName.filePath(), "folder_name": self.saved_output_folder(),
+                       "backup_generated": self.backupQgz.isChecked(),
                        "drawing_tables": dict(self._drawing_tables),
                        "create_zip": self.createZip.isChecked(), "zip_directory": self.zipDirectory.text(),
                        "create_qgz": self.outputMode.currentIndex() == 0,
@@ -404,6 +439,7 @@ class UavInputs:
                 or data.get("version") != CONFIG_VERSION or data.get("mode") != "uav"):
             raise ValueError("現在の形式の設定ファイルを指定してください")
         settings = data.get("map", {})
+        self.exclusionOverlap.setCurrentIndex(1 if settings.get("exclusion_overlap") == "exclusive" else 0)
         self.crs.setCrs(QgsCoordinateReferenceSystem(settings.get("crs", "")))
         self.scale.setScale(float(settings.get("scale") or 5000))
         self.locationScale.setScale(float(settings.get("location_scale", 5000)))
@@ -413,9 +449,10 @@ class UavInputs:
             getattr(self, name).setChecked(bool(settings.get(key, False)))
         self.ichizuDirection.setCurrentIndex(1 if settings.get("location_direction") == 1 else 0)
         for name, key, default in (("areaDecimals", "area_display_decimals", 0), ("haDecimals", "hectare_display_decimals", 2),
+                                    ("distanceDecimals", "distance_display_decimals", 2),
                                     ("minJochi", "minimum_exclusion_area_a", 1), ("hukuin", "road_width_m", 0),
                                     ("singleLineWidth", "single_line_width_m", 0), ("minKijuntenkan", "minimum_reference_distance_m", 20)):
-            getattr(self, name).setValue(float(settings.get(key, default)) if name not in ("areaDecimals", "haDecimals")
+            getattr(self, name).setValue(float(settings.get(key, default)) if name not in ("areaDecimals", "haDecimals", "distanceDecimals")
                                          else int(settings.get(key, default)))
         missing = []
         for name in LAYER_INPUTS:
@@ -433,8 +470,6 @@ class UavInputs:
             getattr(self, name).setText(self.clean_html_text(data.get("names", {}).get(name, "")))
         for prefix in ("", "singleLine"):
             for field, _ in ATTRIBUTE_INPUTS:
-                if field == "edaban":
-                    continue
                 name = prefixed(prefix, field)
                 widget = getattr(self, name)
                 value = literals.get(name)
@@ -443,7 +478,7 @@ class UavInputs:
                 elif isinstance(widget, QComboBox):
                     widget.setCurrentIndex(max(0, widget.findText(str(value or ""))))
                 elif isinstance(widget, QAbstractSpinBox):
-                    widget.setValue(int(value) if value is not None else -1)
+                    widget.setValue(int(value) if value is not None else (1 if field == "edaban" else -1))
                 else:
                     widget.setText(self.clean_html_text(value))
         for name in self._override_bindings:
@@ -460,6 +495,10 @@ class UavInputs:
         self.zipDirectory.setText(self.clean_html_text(output.get("zip_directory", "")))
         self.outputMode.setCurrentIndex(0 if output.get("create_qgz", True) else 1)
         self.fileName.setFilePath(self.clean_html_text(output.get("directory")))
+        self.restore_output_folder(output.get("folder_name", ""))
         self.backupQgz.setChecked(bool(output.get("backup_generated", False)))
-        self.assignmentOlso.setFilePath(self.clean_html_text(output.get("assignment_ortho")))
+        if "assignment_ortho" in output:
+            self.assignmentOlso.setFilePath(self.clean_html_text(output.get("assignment_ortho")))
+        else:
+            self.autofill_assignment_ortho(self.olso.currentLayer())
         return missing

@@ -1,5 +1,6 @@
 """Drawing options and submission archive output."""
 import os
+import hashlib
 import shutil
 import subprocess
 import tempfile
@@ -17,6 +18,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from .unified_project import feature_uid
+from qgis.core import QgsVariantUtils
 
 
 @contextmanager
@@ -42,8 +44,8 @@ class DrawingOutput:
         self.attributeTables = QPushButton("図面ごとの属性表…")
         self.attributeTables.clicked.connect(self.edit_drawing_tables)
         self.formLayout_3.addRow("属性表", self.attributeTables)
-        self.createZip = QCheckBox("ZIPを作成する")
-        self.formLayout_3.addRow("ZIP", self.createZip)
+        self.createZip = QCheckBox("作成する")
+        self.formLayout_3.addRow("提出用ZIP", self.createZip)
         row = QHBoxLayout()
         self.zipDirectory = QLineEdit()
         self.zipDirectory.setPlaceholderText("出力フォルダに保存")
@@ -51,7 +53,7 @@ class DrawingOutput:
         self.zipBrowse.clicked.connect(self.choose_zip_directory)
         row.addWidget(self.zipDirectory, 1)
         row.addWidget(self.zipBrowse)
-        self.formLayout_3.addRow("ZIP保存先", row)
+        self.formLayout_3.addRow("提出用ZIP保存先", row)
         self.createZip.toggled.connect(self.zipDirectory.setEnabled)
         self.createZip.toggled.connect(self.zipBrowse.setEnabled)
         self.zipDirectory.setEnabled(False)
@@ -59,7 +61,7 @@ class DrawingOutput:
 
     def choose_zip_directory(self):
         path = QFileDialog.getExistingDirectory(
-            self, "ZIPの保存先", self.zipDirectory.text() or self.fileName.filePath())
+            self, "提出用ZIPの保存先", self.zipDirectory.text() or self.fileName.filePath())
         if path:
             self.zipDirectory.setText(path)
 
@@ -67,13 +69,14 @@ class DrawingOutput:
         try:
             candidates = []
             if self.polygon.currentLayer() is not None and self.selected_features("polygon", "polygonFilter"):
-                candidates.append(("aggregate", "申請区域図（全体）"))
+                candidates.append(("aggregate", "申請区域"))
             source = self.singleLine.currentLayer()
             if source is not None:
                 for index, feature in enumerate(self.selected_features("singleLine", "singleLineFilter"), 1):
                     name = self.clean_html_text(self.evaluate_attribute("singleLineName", source, feature)).strip()
+                    attributes = self.polygon_attributes(source, feature, name, "singleLine")
                     candidates.append(("line:" + feature_uid(source, feature),
-                                       f"付帯作工物図 No.{index} {name}"))
+                                       f"付帯作工物図 No.{attributes['No']} {name}"))
             if not candidates:
                 raise ValueError("施行地または付帯作工物の対象地物を指定してください")
         except Exception as error:
@@ -115,6 +118,36 @@ class DrawingOutput:
                     "Microsoft/Edge/Application/msedge.exe", "Google/Chrome/Application/chrome.exe"))
         return next((path for path in candidates if path and Path(path).is_file()), None)
 
+    def submission_zip_groups(self):
+        """Keep each drawing's full shapefile under every application it names."""
+        groups = {}
+        folder_owners = {"申請番号未指定".casefold(): ""}
+        for drawing in self.drawings:
+            numbers = []
+            for feature in drawing["application_layer"].getFeatures():
+                raw = feature["申請No"]
+                number = "" if QgsVariantUtils.isNull(raw) else str(raw).strip()
+                if number not in numbers:
+                    numbers.append(number)
+            for number in numbers or [""]:
+                folder = self.safe_file_name(number) if number else "申請番号未指定"
+                # Different raw numbers must never silently merge after filename
+                # sanitization (including collision with the missing-number name).
+                if folder.casefold() in folder_owners and folder_owners[folder.casefold()] != number:
+                    folder += "_" + hashlib.sha256(number.encode("utf-8")).hexdigest()[:8]
+                folder_owners[folder.casefold()] = number
+                drawings = groups.setdefault(folder, [])
+                if drawing not in drawings:
+                    drawings.append(drawing)
+        return groups
+
+    @staticmethod
+    def drawing_pdf_title(drawing):
+        if drawing["kind"] == "申請区域":
+            return "申請区域図"
+        name = Path(drawing["folder"]).name.removeprefix("付帯作工物 - ")
+        return "付帯作工物図 - " + name
+
     def build_drawing_zip(self):
         """Build from this run only; atomically replace ZIP without making a backup."""
         browser = self.pdf_browser()
@@ -136,6 +169,7 @@ class DrawingOutput:
             pdfs = []
             for index, drawing in enumerate(self.drawings, 1):
                 root = ET.parse(str(output / "index.html"), ET.HTMLParser()).getroot()
+                root.find("head/title").text = self.drawing_pdf_title(drawing)
                 root.find("body").set("data-print-all", "1")
                 for sheet in root.xpath("//div[contains(concat(' ', normalize-space(@class), ' '), ' drawing-sheet ')]"):
                     if sheet.get("data-drawing") != str(index):
@@ -169,22 +203,22 @@ class DrawingOutput:
                         time.sleep(.05)
                     if not pdf.is_file() or pdf.stat().st_size < 100:
                         raise OSError(f"HTML図面のPDF化に失敗しました: {drawing['folder']}")
-                pdfs.append((pdf, "図面/" + self.safe_file_name(drawing["folder"].replace("/", "_")) + ".pdf"))
+                pdfs.append((pdf, "図面/" + self.safe_file_name(self.drawing_pdf_title(drawing)) + ".pdf"))
             pending = temp / filename
             with zipfile.ZipFile(pending, "w", zipfile.ZIP_DEFLATED) as archive:
                 for pdf, name in pdfs:
                     archive.write(pdf, name)
                 archive.write(output / "位置図/位置図.pdf", "位置図/位置図.pdf")
-                for path in sorted(Path(ortho).parent.glob(Path(ortho).stem + ".*")):
-                    if path.is_file():
-                        archive.write(path, "オルソ/" + path.name)
-                for drawing in self.drawings:
-                    source = output / "シェープファイル" / Path(drawing["folder"]).name
-                    folder = ("申請区域" if drawing["kind"] == "申請区域" else
-                              "付帯作工物/" + Path(drawing["folder"]).name)
-                    for path in sorted(source.iterdir()):
-                        if path.is_file() and path.suffix.lower() in (".shp", ".shx", ".dbf", ".prj", ".cpg"):
-                            archive.write(path, "シェープファイル/" + folder + "/" + path.name)
+                for application, drawings in self.submission_zip_groups().items():
+                    for path in sorted(Path(ortho).parent.glob(Path(ortho).stem + ".*")):
+                        if path.is_file():
+                            archive.write(path, application + "/オルソ/" + path.name)
+                    for drawing in drawings:
+                        source = output / "シェープファイル" / Path(drawing["folder"]).name
+                        folder = Path(drawing["folder"]).name
+                        for path in sorted(source.iterdir()):
+                            if path.is_file() and path.suffix.lower() in (".shp", ".shx", ".dbf", ".prj", ".cpg"):
+                                archive.write(path, application + "/シェープファイル/" + folder + "/" + path.name)
             with zipfile.ZipFile(pending) as archive:
                 if archive.testzip() is not None:
                     raise OSError("ZIPの検証に失敗しました")

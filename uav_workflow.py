@@ -26,6 +26,7 @@ from .unified_project import UnifiedProjects, UID, feature_uid, source_key, meta
 from .project_session import ProjectSession
 from .uav_inputs import UavInputs
 from .drawing_output import DrawingOutput
+from .exclusion_geometry import exclusion_parts
 
 
 ROOT = Path(__file__).parent
@@ -62,15 +63,15 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
         staging = None
         session = None
         temporary_config = None
+        final = None
         closed = False
         original_project = QgsProject.instance().fileName()
         self._retained_output_paths = set()
         try:
             if not test:
-                directory = self.fileName.filePath().strip()
-                if not directory:
-                    raise ValueError("出力先には存在するフォルダを指定してください")
-                temporary_config = Path(directory) / "input.tmp.config"
+                final = self.resolved_output_directory()
+                final.mkdir(exist_ok=True)
+                temporary_config = final / "input.tmp.config"
                 if not self.save_config_file(temporary_config):
                     return
             create_project = self.outputMode.currentIndex() == 0
@@ -91,7 +92,6 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                 self.append_output_log("試算完了。ファイルは生成していません。")
                 self.progressBar.setValue(100)
                 return
-            final = Path(self.fileName.filePath())
             staging = Path(tempfile.mkdtemp(prefix=".ringyo_zumen_tmp_", dir=final))
             self._output_dir_override = staging
             self._final_output_dir = final
@@ -174,7 +174,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                     delattr(self, attribute)
             if (staging is not None and staging.exists() and not staging.is_symlink()
                     and staging.name.startswith(".ringyo_zumen_tmp_")
-                    and staging.resolve().parent == Path(self.fileName.filePath()).resolve()):
+                    and final is not None and staging.resolve().parent == final.resolve()):
                 shutil.rmtree(staging, ignore_errors=True)
 
     def checked_geometry(self, layer, feature):
@@ -258,10 +258,10 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                 geometry = self.checked_geometry(source, feature)
                 name = self.clean_html_text(self.evaluate_attribute("polygonName", source, feature)).strip()
                 polygons.append((geometry, self.polygon_attributes(source, feature, name)))
-                polygons[-1][1]["No"] = number
                 polygons[-1][1][UID] = feature_uid(source, feature)
         if polygons:
             exclusion_sources = []
+            priorities = {}
             for combo_name, filter_name, expression, is_road in (
                 ("jochiPolygon", "jochiFilter", "jochiName", False),
                 ("sagyodoLine", "sagyodoFilter", "jochiNameSagyodo", True),
@@ -277,9 +277,15 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                     name = self.clean_html_text(self.evaluate_attribute(expression, layer, feature)).strip()
                     description = "・".join(filter(None, (name, f"幅{width:g}m"))) if is_road else name
                     line_data = (self.checked_geometry(layer, feature), width) if is_road else None
-                    exclusion_sources.append((geometry, name, description, line_data))
+                    priority = self.exclusion_priority("sagyodoPriority" if is_road else "jochiPriority", layer, feature)
+                    if priority is not None:
+                        if priority in priorities:
+                            raise ValueError(f"除地の優先順位{priority}が重複しています: {priorities[priority]} / {layer.name()} 地物ID={feature.id()}")
+                        priorities[priority] = f"{layer.name()} 地物ID={feature.id()}"
+                    exclusion_sources.append((geometry, name, description, line_data, priority, len(exclusion_sources)))
+            exclusion_sources.sort(key=lambda s: (s[4] is None, s[4] or 0, s[5]))
             self.build_application_geometry(polygons, exclusion_sources)
-            self.remember_drawing("申請区域", "全体", None, used_names,
+            self.remember_drawing("申請区域", "申請区域", None, used_names,
                                   [attributes["製図事業者"] for _, attributes in polygons])
 
         for combo_name, is_line in (("singleLine", True),):
@@ -290,7 +296,6 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                 geometry = self.checked_geometry(source, feature)
                 name = self.clean_html_text(self.evaluate_attribute(combo_name + "Name", source, feature)).strip()
                 attributes = self.polygon_attributes(source, feature, name, combo_name)
-                attributes["No"] = index
                 attributes[UID] = feature_uid(source, feature)
                 if is_line:
                     width = self.numeric_override("singleLineWidth", source, feature)
@@ -306,6 +311,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
         self.work_area = self.exclusion_area = self.application_area = 0
         self.work_terms = []
         self.exclusion_terms = []
+        self.exclusion_adjustments = []
         self.excluded_small_parts = []
         self.application_layer = self.memory_polygon_layer(
             "付帯作工物", [(geometry, attributes)], self.application_field_definitions(True), "MultiLineString")
@@ -329,7 +335,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
         return "・".join(filter(None, (name, f"延長{length_text}m × 幅{width:g}m")))
 
     def remember_drawing(self, kind, title, attributes, used_names, header_companies=None):
-        name = self.safe_file_name(f"{kind} - {title}")
+        name = self.safe_file_name(kind if attributes is None else f"{kind} - {title}")
         base = name
         suffix = 2
         while name.casefold() in used_names:
@@ -341,7 +347,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                 layer.setName(f"{name} - {layer.name()}")
         state = {key: getattr(self, key) for key in (
             "work_area", "exclusion_area", "application_area", "work_terms", "exclusion_terms",
-            "excluded_small_parts", "original_layer", "exclusion_layer", "application_layer",
+            "excluded_small_parts", "exclusion_adjustments", "original_layer", "exclusion_layer", "application_layer",
             "result_layers", "reference_layer", "reference_distance")}
         key = "aggregate" if attributes is None else "line:" + attributes[UID]
         folder = (Path("付帯作工物") / name).as_posix() if attributes is not None else name
@@ -404,46 +410,68 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                 "company": attributes.get("製図事業者", "")}
 
     def build_application_geometry(self, polygons, exclusion_sources, single=False):
-        exclusions_union = self.checked_operation(
-            QgsGeometry.unaryUnion([geometry for geometry, _, _, _ in exclusion_sources]),
-            "除地の重複統合",
-        ) if exclusion_sources else QgsGeometry()
+        # Four-item sources remain supported for callers supplying no priorities.
+        sources = [tuple(source) + (None, index) if len(source) == 4 else source
+                   for index, source in enumerate(exclusion_sources)]
+        sources.sort(key=lambda s: (s[4] is None, s[4] or 0, s[5]))
         accepted = []
         results = []
         self.excluded_small_parts = []
+        self.exclusion_adjustments = []
+        zero_terms = []
         minimum = self.minJochi.value() * 100
         for geometry, attributes in polygons:
-            clipped = self.checked_operation(geometry.intersection(exclusions_union), "除地との重なり") if exclusion_sources else QgsGeometry()
+            pieces, skipped, notes = exclusion_parts(self, geometry, sources, minimum)
+            self.excluded_small_parts.extend(skipped)
+            self.exclusion_adjustments.extend(note[:4] for note in notes)
+            changed_members = {note[4] for note in notes}
+            for name, _, _, remaining, member in notes:
+                if remaining <= 1e-8:
+                    source = sources[member]
+                    description = source[2] or name
+                    if source[3] is not None:
+                        centerline, width = source[3]
+                        length = self.checked_operation(centerline.intersection(geometry), "除地ライン延長").length()
+                        description = self.line_calculation_label(name, length, width)
+                    priority = source[4]
+                    zero_terms.append(((priority is None, priority or 0, source[5]),
+                                       description + "・重複部分除去済み", 0.0))
             accepted_parts = []
-            for part in self.polygon_parts(clipped):
+            for part, members in pieces:
                 names = []
                 descriptions = []
                 line_lengths = []
-                for exclusion_geometry, name, description, line_data in exclusion_sources:
-                    if part.intersection(exclusion_geometry).area() > 1e-8:
-                        if name and name not in names:
-                            names.append(name)
-                        if line_data is not None:
-                            centerline, width = line_data
-                            length = self.checked_operation(centerline.intersection(part), "除地ライン延長").length()
-                            line_lengths.append(math.floor(length))
-                            description = self.line_calculation_label(name, length, width)
-                        if description and description not in descriptions:
-                            descriptions.append(description)
+                for member in members:
+                    _, name, description, line_data, _, _ = sources[member]
+                    if name and name not in names:
+                        names.append(name)
+                    if line_data is not None:
+                        centerline, width = line_data
+                        # Overlap partitioning must never shorten the displayed
+                        # source line or change its width. Shared regions carry
+                        # names only, rather than source line dimensions.
+                        length = self.checked_operation(centerline.intersection(geometry), "除地ライン延長").length()
+                        line_lengths.append(math.floor(length))
+                        description = self.line_calculation_label(name, length, width) if len(members) == 1 else name
+                    if description and description not in descriptions:
+                        descriptions.append(description)
                 label = "・".join(names)
-                # 閾値は表示丸め前の面積へ適用する。
-                if part.area() < minimum:
-                    self.excluded_small_parts.append((label, part.area()))
-                    continue
+                if any(member in changed_members for member in members):
+                    descriptions.append("重複部分除去済み")
+                priority = sources[members[0]][4] if len(members) == 1 else None
+                default_order = min(sources[member][5] for member in members)
                 accepted_parts.append(part)
                 accepted.append((part, {"label": label, "source_id": attributes["source_id"],
                                         UID: str(uuid.uuid5(uuid.UUID(attributes[UID]), part.asWkt(8))),
                                         "延長m": sum(line_lengths) if line_lengths else None,
                                         "calculation_label": "・".join(descriptions),
+                                        "_members": members,
+                                        "_priority_order": (priority is None, priority or 0, default_order),
                                         "area_m2": part.area()}))
             removed = QgsGeometry.unaryUnion(accepted_parts) if accepted_parts else QgsGeometry()
             result = self.checked_operation(geometry.difference(removed), "除地の除去") if accepted_parts else QgsGeometry(geometry)
             results.append((result, dict(attributes)))
+        accepted.sort(key=lambda item: item[1]["_priority_order"])
         self.work_area = math.fsum(geometry.area() for geometry, _ in polygons)
         self.exclusion_area = math.fsum(geometry.area() for geometry, _ in accepted)
         self.application_area = math.fsum(geometry.area() for geometry, _ in results)
@@ -453,7 +481,15 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
             if not single:
                 attributes["更新ha"] = float(self.hectares(self.work_area, 2))
         self.work_terms = [(attributes["label"], geometry.area()) for geometry, attributes in polygons]
-        self.exclusion_terms = [(attributes["calculation_label"], geometry.area()) for geometry, attributes in accepted]
+        formula_terms = {}
+        for geometry, attributes in accepted:
+            key = (attributes["_members"], attributes["calculation_label"])
+            formula_terms.setdefault(key, []).append(geometry.area())
+        orders = {(a["_members"], a["calculation_label"]): a["_priority_order"] for _, a in accepted}
+        ordered_terms = [(orders[key], key[1], math.fsum(areas)) for key, areas in formula_terms.items()]
+        ordered_terms.extend(zero_terms)
+        ordered_terms.sort(key=lambda item: item[0])
+        self.exclusion_terms = [(name, area) for _, name, area in ordered_terms]
         self.original_layer = self.memory_polygon_layer("元区域" if single else "更新区域（除去前）", [
             (geometry, {**attributes, "area_m2": geometry.area()}) for geometry, attributes in polygons
         ])
@@ -853,7 +889,8 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
         directory = self.drawing_output_dir()
         directory.mkdir(parents=True, exist_ok=True)
         kind = self._current_drawing['kind']
-        filename = f"{self.safe_file_name(self._current_drawing['title'])} - {kind}.shp"
+        filename = ("申請区域.shp" if kind == "申請区域" else
+                    f"{self.safe_file_name(self._current_drawing['title'])} - {kind}.shp")
         options = QgsVectorFileWriter.SaveVectorOptions()
         options.driverName = "ESRI Shapefile"
         options.fileEncoding = "UTF-8"
@@ -1011,6 +1048,15 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
             self.apply_latex_parts(element, [
                 (f"1:{displayed_scale:g}", rf"1\mathbin{{:}}{displayed_scale:g}"),
             ])
+        if self.reference_distance is not None:
+            scale_row = root.xpath("//*[@id='scale_']")[0]
+            detail = scale_row.getparent()
+            distance_row = ET.Element("div", {"class": "reference-distance"})
+            ET.SubElement(distance_row, "dt", {"class": "description"}).text = "基準点間距離"
+            value = ET.SubElement(distance_row, "dd", {"class": "value"})
+            distance = self.format_decimal(self.reference_distance, self.distanceDecimals.value())
+            self.apply_latex_parts(value, [(distance + " m", distance + r"\,\mathrm{m}")])
+            detail.insert(detail.index(scale_row) + 1, distance_row)
         panel = root.xpath("//*[@id='calc_area']")[0]
         self.replace_children_with_text(panel, "")
         single = self._current_drawing["kind"] != "申請区域"
@@ -1064,6 +1110,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
         sheet.set("class", "drawing-sheet")
         sheet.set("data-drawing", str(index))
         sheet.set("data-title", self._current_drawing["folder"])
+        sheet.set("data-print-title", self.drawing_pdf_title(self._current_drawing))
         if self.drawing_has_table():
             sheet.set("class", "drawing-sheet has-attribute-table")
             container = sheet.xpath(".//*[@id='map_container']")[0]
@@ -1114,6 +1161,8 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
                 chunks = name.replace(" × ", "・× ").split("・")
                 for chunk_index, chunk in enumerate(chunks):
                     token = ET.SubElement(description, "span", {"class": "deduction-description-token"})
+                    if chunk.startswith("× "):
+                        token.set("style", "margin-left: .3em")
                     token.text = ("（" if chunk_index == 0 else "") + chunk
                     token.text += "）" if chunk_index == len(chunks) - 1 else (" " if chunks[chunk_index + 1].startswith("× ") else "・")
         if len(terms) > 1:
@@ -1129,7 +1178,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
         body.remove(root.xpath("//*[@id='main_container']")[0])
         for index, sheet in enumerate(sheets):
             body.insert(index, sheet)
-        root.find("head/title").text = "申請区域図・付帯作工物図"
+        root.find("head/title").text = sheets[0].get("data-print-title", "申請区域図")
         body.set("data-paper", self.paper.currentText())
         width, height = (420, 297) if self.paper.currentText() == "A3" else (297, 210)
         style = ET.SubElement(root.find("head"), "style")

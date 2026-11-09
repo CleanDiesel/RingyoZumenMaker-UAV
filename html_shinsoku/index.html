@@ -8,7 +8,7 @@
 </head>
 <body>
   <div id="main_container">
-    <h1>申請区域図</h1>
+    <h1>申請区域</h1>
     <div id="info_container">
       <div id="seizudate">
         <div class="description">製図年月日</div>
@@ -82,7 +82,10 @@
         });
       });
 
-      if (window.RingyoLayout) window.RingyoLayout.paginateTables();
+      if (window.RingyoLayout) {
+        window.RingyoLayout.paginateTables();
+        window.RingyoLayout.paginateCalculations();
+      }
       const sheets = Array.from(document.querySelectorAll(".drawing-sheet"));
       sheets.forEach(sheet => sheet.style.display = "");
       sheets.forEach((sheet) => {
@@ -113,6 +116,7 @@
       next.textContent = "次の図面";
       const show = (index) => {
         select.selectedIndex = index;
+        document.title = sheets[index].dataset.printTitle || sheets[index].dataset.title;
         sheets.forEach((sheet, i) => sheet.classList.toggle("active", i === index));
         previous.disabled = index === 0;
         next.disabled = index === sheets.length - 1;

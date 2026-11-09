@@ -18,7 +18,7 @@ from qgis.core import (
     QgsMapLayerStyle, QgsMapThemeCollection, QgsPalLayerSettings,
     QgsPrintLayout, QgsProject, QgsProperty, QgsPropertyDefinition,
     QgsReadWriteContext, QgsReferencedRectangle, QgsVectorFileWriter,
-    QgsVectorLayer, QgsGeometryGeneratorSymbolLayer, QgsVariantUtils,
+    QgsVectorLayer, QgsRasterLayer, QgsGeometryGeneratorSymbolLayer, QgsVariantUtils,
 )
 
 from .editable_projects import make_project_references_relative
@@ -525,6 +525,8 @@ class UnifiedProjects:
             layer = canonical_layers.get(key)
             config["layers"][role] = self.owner.layer_reference(layer) if layer else None
         config["output"]["directory"] = ".."
+        # The saved project already lives inside the chosen output subfolder.
+        config["output"]["folder_name"] = ""
         if self.copied_ortho:
             config["output"]["assignment_ortho"] = os.path.relpath(self.copied_ortho, self.qgz_dir).replace("\\", "/")
         info = {"format": "RingyoZumenMaker.project", "version": 1, "config": config,
@@ -534,7 +536,10 @@ class UnifiedProjects:
         if not project.write():
             raise OSError("統合QGZを保存できません: " + project.error())
         references = [self.gpkg]
-        if self.copied_ortho:
+        if self.copied_ortho and any(
+                isinstance(layer, QgsRasterLayer) and
+                Path(layer.source().split("|")[0]).resolve() == Path(self.copied_ortho).resolve()
+                for layer in project.mapLayers().values()):
             references.append(self.copied_ortho)
         references.extend(path for path in self.qgz_dir.glob("*.svg"))
         project.clear()

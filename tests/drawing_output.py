@@ -71,8 +71,8 @@ widget.fileName.setFilePath(str(output))
 widget.validate_inputs()
 widget.calculate_uav()
 assert len(widget.drawings) == 3
-assert [f["No"] for f in widget.drawings[0]["application_layer"].getFeatures()] == list(range(1, 17))
-assert [d["attributes"]["No"] for d in widget.drawings[1:]] == [1, 2]
+assert [f["No"] for f in widget.drawings[0]["application_layer"].getFeatures()] == [1] * 16
+assert [d["attributes"]["No"] for d in widget.drawings[1:]] == [1, 1]
 assert "枝番" not in widget.drawings[0]["application_layer"].fields().names()
 assert widget.application_layer.labeling().settings().isExpression
 assert "'No.'" in widget.application_layer.labeling().settings().fieldName

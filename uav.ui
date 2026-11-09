@@ -552,14 +552,18 @@
             <item row="4" column="0">
              <widget class="QLabel" name="label_20">
               <property name="text">
-               <string>No（自動採番）</string>
+               <string>No</string>
               </property>
              </widget>
             </item>
             <item row="4" column="1">
              <layout class="QHBoxLayout" name="edabanInputLayout">
               <item>
-               <widget class="QgsFieldExpressionWidget" name="edaban"/>
+               <widget class="QSpinBox" name="edaban">
+                <property name="minimum"><number>0</number></property>
+                <property name="maximum"><number>2147483647</number></property>
+                <property name="value"><number>1</number></property>
+               </widget>
               </item>
               <item>
                <widget class="QgsPropertyOverrideButton" name="edabanOverride"/>
@@ -1082,14 +1086,18 @@
             <item row="4" column="0">
              <widget class="QLabel" name="singleLineLabel_20">
               <property name="text">
-               <string>No（自動採番）</string>
+               <string>No</string>
               </property>
              </widget>
             </item>
             <item row="4" column="1">
              <layout class="QHBoxLayout" name="singleLineEdabanInputLayout">
               <item>
-               <widget class="QgsFieldExpressionWidget" name="singleLineEdaban"/>
+               <widget class="QSpinBox" name="singleLineEdaban">
+                <property name="minimum"><number>0</number></property>
+                <property name="maximum"><number>2147483647</number></property>
+                <property name="value"><number>1</number></property>
+               </widget>
               </item>
               <item>
                <widget class="QgsPropertyOverrideButton" name="singleLineEdabanOverride"/>

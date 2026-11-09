@@ -33,6 +33,7 @@
         const next = document.createElement("div");
         next.className = "drawing-sheet main_container attribute-continuation";
         next.dataset.drawing = sheet.dataset.drawing;
+        next.dataset.printTitle = sheet.dataset.printTitle || sheet.dataset.title;
         next.dataset.title = sheet.dataset.title + "（属性表" + (pageNumber > 1 ? " " + pageNumber : "") + "）";
         next.append(sheet.querySelector("h1").cloneNode(true));
         const header = sheet.querySelector(".info_container").cloneNode(true);
@@ -41,13 +42,15 @@
         const area = document.createElement("div");
         area.className = "sub_container";
         continuationFrame = document.createElement("div");
-        continuationFrame.className = "attribute-frame";
+        continuationFrame.className = "map_container attribute-frame";
         current = table.cloneNode(false);
         const columns = table.querySelector("colgroup");
         if (columns) current.append(columns.cloneNode(true));
         current.append(table.tHead.cloneNode(true), document.createElement("tbody"));
         continuationFrame.append(current);
-        area.append(continuationFrame);
+        const calculationColumn = sheet.querySelector('.xy_container').cloneNode(true);
+        removeIds(calculationColumn);
+        area.append(calculationColumn, continuationFrame);
         next.append(area);
         after.after(next);
         next.style.display = "block";
@@ -86,5 +89,96 @@
     }
     document.querySelectorAll(".attribute-continuation").forEach(sheet => sheet.style.display = "");
   }
-  window.RingyoLayout = {paginateTables};
+  function paginateCalculations() {
+    for (const sheet of [...document.querySelectorAll('.drawing-sheet:not(.attribute-continuation):not(.calculation-continuation)')]) {
+      const column = sheet.querySelector('.xy_container');
+      const map = sheet.querySelector('.map_container');
+      const calculation = sheet.querySelector('.calc');
+      if (!column || !map || !calculation) continue;
+      sheet.style.display = 'block';
+      const fitsColumn = () => column.getBoundingClientRect().height <= map.getBoundingClientRect().height + .5;
+      if (!fitsColumn()) column.classList.add('calculations-compact');
+      if (fitsColumn()) {
+        for (const page of document.querySelectorAll('.attribute-continuation')) {
+          if (page.dataset.drawing !== sheet.dataset.drawing) continue;
+          const copy = column.cloneNode(true);
+          removeIds(copy);
+          page.querySelector('.xy_container').replaceWith(copy);
+        }
+        sheet.style.display = '';
+        continue;
+      }
+      const units = [];
+      for (const row of calculation.querySelector('.calc_area').children) {
+        const deductions = row.querySelector('.calc-deduction');
+        if (deductions) {
+          units.push(row.querySelector('.calc-label').cloneNode(true));
+          units.push(...[...deductions.children].map(child => child.cloneNode(true)));
+        } else units.push(row.cloneNode(true));
+      }
+      // Fill the first page, then pair both continuation streams by page index.
+      // Attribute pages already exist at this point and can host calculations.
+      const attributePages = [...document.querySelectorAll('.attribute-continuation')]
+        .filter(page => page.dataset.drawing === sheet.dataset.drawing);
+      const columnTemplate = column.cloneNode(true);
+      removeIds(columnTemplate);
+      const mapTemplate = map.cloneNode(true);
+      removeIds(mapTemplate);
+      const area = calculation.querySelector('.calc_area');
+      area.replaceChildren();
+      area.classList.add('calculation-units');
+      let after = sheet, frame = column, contents = area, number = 0;
+      const height = map.getBoundingClientRect().height;
+      frame.style.height = height + 'px';
+      function newPage() {
+        number++;
+        let next = attributePages[number - 1];
+        if (!next) {
+          next = document.createElement('div');
+          next.className = 'drawing-sheet main_container calculation-continuation';
+          next.dataset.drawing = sheet.dataset.drawing;
+          next.dataset.printTitle = sheet.dataset.printTitle || sheet.dataset.title;
+          next.dataset.title = sheet.dataset.title + '（続き ' + (number + 1) + '）';
+          next.append(sheet.querySelector('h1').cloneNode(true));
+          const header = sheet.querySelector('.info_container').cloneNode(true);
+          removeIds(header);
+          next.append(header);
+          const area = document.createElement('div');
+          area.className = 'sub_container';
+          area.append(columnTemplate.cloneNode(true), mapTemplate.cloneNode(true));
+          next.append(area);
+          after.after(next);
+        }
+        next.classList.add('calculation-continuation');
+        next.dataset.title = sheet.dataset.title + '（続き ' + (number + 1) + '）';
+        next.dataset.calculationContinuation = '1';
+        const oldColumn = next.querySelector('.xy_container');
+        frame = columnTemplate.cloneNode(true);
+        frame.style.height = height + 'px';
+        oldColumn.replaceWith(frame);
+        frame.querySelector('.calc-heading').textContent += '（続き）';
+        contents = frame.querySelector('.calc_area');
+        contents.replaceChildren();
+        contents.classList.add('calculation-units');
+        next.style.display = 'block';
+        after = next;
+      }
+      for (const unit of units) {
+        contents.append(unit);
+        if (frame.scrollHeight <= frame.clientHeight + 1) continue;
+        unit.remove();
+        newPage();
+        contents.append(unit);
+      }
+      // Extra table pages repeat the calculation block of the first page.
+      for (const page of attributePages.slice(number)) {
+        const copy = column.cloneNode(true);
+        removeIds(copy);
+        page.querySelector('.xy_container').replaceWith(copy);
+      }
+      sheet.style.display = '';
+    }
+    document.querySelectorAll('.calculation-continuation').forEach(sheet => sheet.style.display = '');
+  }
+  window.RingyoLayout = {paginateTables, paginateCalculations};
 })();
