@@ -577,7 +577,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
         settings = labeling.settings() if labeling else QgsPalLayerSettings()
         settings.fieldName = "label"
         settings.isExpression = False
-        if layer.fields().indexFromName("No") >= 0:
+        if not is_line and layer.fields().indexFromName("No") >= 0:
             settings.fieldName = "'No.' || to_string(\"No\") || CASE WHEN coalesce(\"label\", '') = '' THEN '' ELSE ' ' || \"label\" END"
             settings.isExpression = True
         settings.geometryGeneratorEnabled = False
@@ -606,7 +606,7 @@ class UavWorkflow(ProjectSession, UavInputs, DrawingOutput):
         text_format.setBuffer(buffer)
         settings.setFormat(text_format)
         layer.setLabeling(QgsVectorLayerSimpleLabeling(settings))
-        layer.setLabelsEnabled(layer.fields().indexFromName("No") >= 0 or
+        layer.setLabelsEnabled((not is_line and layer.fields().indexFromName("No") >= 0) or
                                any(self.clean_html_text(feature["label"]).strip() for feature in layer.getFeatures()))
 
     def log_calculation(self):

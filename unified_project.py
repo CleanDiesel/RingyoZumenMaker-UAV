@@ -19,6 +19,7 @@ from qgis.core import (
     QgsPrintLayout, QgsProject, QgsProperty, QgsPropertyDefinition,
     QgsReadWriteContext, QgsReferencedRectangle, QgsVectorFileWriter,
     QgsVectorLayer, QgsRasterLayer, QgsGeometryGeneratorSymbolLayer, QgsVariantUtils,
+    QgsVectorLayerSimpleLabeling,
 )
 
 from .editable_projects import make_project_references_relative
@@ -439,19 +440,28 @@ class UnifiedProjects:
                     manager.addStyle(style_name, adjusted)
                     current.writeToLayer(layer)
                 manager.setCurrentStyle(style_name)
+                if dataset_key.startswith("output:line:") and layer.labeling():
+                    settings = layer.labeling().settings()
+                    legacy_label = "'No.' || to_string(\"No\") || CASE WHEN coalesce(\"label\", '') = '' THEN '' ELSE ' ' || \"label\" END"
+                    if settings.isExpression and settings.fieldName == legacy_label:
+                        settings.fieldName = "label"
+                        settings.isExpression = False
+                        layer.setLabeling(QgsVectorLayerSimpleLabeling(settings))
+                        layer.setLabelsEnabled(any(self.owner.clean_html_text(feature["label"]).strip()
+                                                   for feature in layer.getFeatures()))
                 visible.append(layer)
             if not project.mapThemeCollection().hasMapTheme(theme_name):
                 for node in root.findLayers():
                     node.setItemVisibilityChecked(node.layer() in visible)
-                root.setHasCustomLayerOrder(True)
-                remaining = [layer for layer in project.mapLayers().values() if layer not in visible]
-                order = visible + remaining
                 if not self.old_metadata:
+                    root.setHasCustomLayerOrder(True)
+                    remaining = [layer for layer in root.layerOrder() if layer not in visible]
+                    order = visible + remaining
                     references = canonical_layers.get(self.aliases.get("output:references"))
                     if references in order:
                         order.remove(references)
                         order.insert(0, references)
-                root.setCustomLayerOrder(order)
+                    root.setCustomLayerOrder(order)
                 record = QgsMapThemeCollection.createThemeFromCurrentState(root, model)
                 project.mapThemeCollection().insert(theme_name, record)
             else:
@@ -505,6 +515,15 @@ class UnifiedProjects:
                         item.setPicturePath(str(target))
             descriptors.append({"key": key, "layout": layout.name(), "theme": theme_name,
                                 "output": capture["output"], "drawing": capture["drawing"]})
+        if not self.old_metadata:
+            # Match the layer panel to the generated drawing order, then let
+            # subsequent drag-and-drop edits control both canvas and layouts.
+            ordered_nodes = [root.findLayer(layer.id()).clone() for layer in root.customLayerOrder()]
+            previous_nodes = list(root.children())
+            root.insertChildNodes(0, ordered_nodes)
+            for node in previous_nodes:
+                root.removeChildNode(node)
+            root.setHasCustomLayerOrder(False)
         old_generated_themes = {item["theme"] for item in (self.old_metadata or {}).get("layouts", [])}
         for layout in list(project.layoutManager().layouts()):
             if layout.customProperty("rz/key", "") and layout.customProperty("rz/key") not in generated_layout_keys:
